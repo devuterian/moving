@@ -2,7 +2,9 @@
   --bg: #0b0b0f;
   --fg: #f4f4f6;
   --muted: rgba(244, 244, 246, 0.55);
-  --accent: #6d63ff;
+  --accent: #c5f82a;
+  /* Lime is light: anything drawn on top of it must be dark. */
+  --on-accent: #0b0b0f;
   --accent-2: #ff5c8a;
   --glass: rgba(18, 18, 24, 0.55);
   --safe-top: env(safe-area-inset-top, 0px);
@@ -61,6 +63,12 @@ button:disabled {
 
 .loaded #stage {
   cursor: grab;
+}
+
+/* Front-camera clips play back mirrored, like the preview they were shot with. */
+.mirrored #video,
+.mirrored #canvas {
+  transform: scaleX(-1);
 }
 
 /* While dragging, keep the closed hand everywhere, even over the HUD. */
@@ -138,13 +146,8 @@ button:disabled {
   padding: 24px;
   text-align: center;
   background:
-    radial-gradient(60% 50% at 50% 40%, rgba(109, 99, 255, 0.18), transparent 70%),
+    radial-gradient(60% 50% at 50% 40%, rgba(197, 248, 42, 0.12), transparent 70%),
     var(--bg);
-}
-
-.empty img {
-  border-radius: 14px;
-  margin-bottom: 4px;
 }
 
 .empty h1 {
@@ -176,6 +179,7 @@ button:disabled {
 
 .primary {
   background: var(--accent);
+  color: var(--on-accent);
 }
 
 .secondary {
@@ -383,6 +387,7 @@ button:disabled {
 
 .toggle input:checked + .switch::after {
   transform: translateX(14px);
+  background: var(--on-accent);
 }
 
 .toggle input:focus-visible + .switch {
@@ -552,7 +557,7 @@ button:disabled {
   place-items: center;
   border: 2px dashed var(--accent);
   border-radius: 20px;
-  background: rgba(109, 99, 255, 0.15);
+  background: rgba(197, 248, 42, 0.12);
   font-size: 20px;
   font-weight: 600;
   pointer-events: none;

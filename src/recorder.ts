@@ -1,4 +1,9 @@
-/** In-app camera recording. Resolves with the recorded clip, or null if closed. */
+/**
+ * In-app camera recording. Resolves with the recorded clip, or null if closed.
+ * `mirrored` is set for front-camera clips so playback can match the mirrored
+ * preview the user saw while recording.
+ */
+export type Recording = { file: File; mirrored: boolean }
 
 const MIME_CANDIDATES = [
   'video/mp4;codecs=avc1,mp4a.40.2',
@@ -11,7 +16,7 @@ const MIME_CANDIDATES = [
 export const canRecord = () =>
   !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined'
 
-export function openRecorder(root: HTMLElement): Promise<File | null> {
+export function openRecorder(root: HTMLElement): Promise<Recording | null> {
   return new Promise((resolve) => {
     const el = document.createElement('div')
     el.className = 'recorder'
@@ -38,7 +43,7 @@ export function openRecorder(root: HTMLElement): Promise<File | null> {
 
     const stopStream = () => stream?.getTracks().forEach((t) => t.stop())
 
-    const close = (file: File | null) => {
+    const close = (result: Recording | null) => {
       clearInterval(timer)
       if (recorder?.state === 'recording') {
         recorder.onstop = null
@@ -46,27 +51,30 @@ export function openRecorder(root: HTMLElement): Promise<File | null> {
       }
       stopStream()
       el.remove()
-      resolve(file)
+      resolve(result)
     }
 
     const start = async () => {
       stopStream()
       recBtn.disabled = true
+      const video = { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }
+      let withMic = true
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: true,
-        })
-      } catch (err) {
-        status.textContent = window.isSecureContext
-          ? '카메라·마이크 권한이 필요해요'
-          : '녹화는 HTTPS에서만 돼요'
-        console.warn(err)
-        return
+        stream = await navigator.mediaDevices.getUserMedia({ video, audio: true })
+      } catch {
+        // No mic (or mic permission denied): still let them record picture only.
+        withMic = false
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video })
+        } catch (err) {
+          status.textContent = window.isSecureContext ? '카메라 권한이 필요해요' : '녹화는 HTTPS에서만 돼요'
+          console.warn(err)
+          return
+        }
       }
       preview.srcObject = stream
       preview.classList.toggle('mirrored', facing === 'user')
-      status.textContent = '버튼을 눌러 녹화'
+      status.textContent = withMic ? '버튼을 눌러 녹화' : '마이크 없이 녹화돼요'
       recBtn.disabled = false
     }
 
@@ -79,7 +87,10 @@ export function openRecorder(root: HTMLElement): Promise<File | null> {
       recorder.onstop = () => {
         const type = recorder!.mimeType || mimeType || 'video/webm'
         const ext = type.includes('mp4') ? 'mp4' : 'webm'
-        close(new File(chunks, `녹화-${new Date().toLocaleTimeString('ko-KR')}.${ext}`, { type }))
+        close({
+          file: new File(chunks, `녹화-${new Date().toLocaleTimeString('ko-KR')}.${ext}`, { type }),
+          mirrored: facing === 'user',
+        })
       }
       recorder.start(250)
       startedAt = performance.now()

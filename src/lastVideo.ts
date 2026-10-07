@@ -8,7 +8,7 @@ const DB_NAME = 'scrubber'
 const STORE = 'lastVideo'
 const KEY = 'current'
 
-type Saved = { blob: Blob; name: string; type: string; lastModified: number }
+type Saved = { blob: Blob; name: string; type: string; lastModified: number; mirrored?: boolean }
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -33,7 +33,7 @@ async function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRe
   }
 }
 
-export async function saveLastVideo(file: File) {
+export async function saveLastVideo(file: File, mirrored: boolean) {
   try {
     // Ask the browser not to evict it under storage pressure (best effort).
     void navigator.storage?.persist?.()
@@ -42,6 +42,7 @@ export async function saveLastVideo(file: File) {
       name: file.name,
       type: file.type,
       lastModified: file.lastModified,
+      mirrored,
     }
     await run('readwrite', (s) => s.put(saved, KEY))
   } catch (err) {
@@ -49,11 +50,20 @@ export async function saveLastVideo(file: File) {
   }
 }
 
-export async function loadLastVideo(): Promise<File | null> {
+export async function clearLastVideo() {
+  try {
+    await run('readwrite', (s) => s.delete(KEY))
+  } catch {
+    // nothing to clear
+  }
+}
+
+export async function loadLastVideo(): Promise<{ file: File; mirrored: boolean } | null> {
   try {
     const saved = await run<Saved | undefined>('readonly', (s) => s.get(KEY))
     if (!saved?.blob) return null
-    return new File([saved.blob], saved.name, { type: saved.type, lastModified: saved.lastModified })
+    const file = new File([saved.blob], saved.name, { type: saved.type, lastModified: saved.lastModified })
+    return { file, mirrored: !!saved.mirrored }
   } catch {
     return null
   }

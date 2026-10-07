@@ -1,5 +1,10 @@
 import workletUrl from './scrub-worklet.ts?worker&url'
 import type { WorkletInMessage, WorkletOutMessage } from './scrub-worklet'
+import { streamAudio, type DecodedAudio } from './audioDecode'
+
+const isMobile = matchMedia('(pointer: coarse)').matches
+/** decodeAudioData needs the whole file in memory; past this, go silent instead. */
+const MAX_WHOLE_DECODE_BYTES = (isMobile ? 300 : 1024) * 1024 * 1024
 
 type Listener = () => void
 
@@ -11,6 +16,7 @@ export class AudioEngine {
   private ctx: AudioContext | null = null
   private node: AudioWorkletNode | null = null
   private ready: Promise<void> | null = null
+  private loadSeq = 0
 
   /** Latest playhead state reported by the audio thread. */
   time = 0
@@ -54,37 +60,62 @@ export class AudioEngine {
   }
 
   /**
-   * Decodes the audio track of a media file. Falls back to silence (so the
-   * worklet still works as a clock) when there is no decodable audio.
+   * Decodes the audio track of a media file. Prefers streaming it out with
+   * WebCodecs (low memory, timestamp-accurate); falls back to decodeAudioData
+   * for small files, and to silence (so the worklet still works as a clock)
+   * when there is no decodable audio. Pads with silence up to the video's
+   * length. Resolves null if a newer load() started meanwhile.
    */
-  async load(file: Blob, fallbackDuration: number): Promise<{ hasAudio: boolean; duration: number }> {
+  async load(file: Blob, videoDuration: number): Promise<{ hasAudio: boolean; duration: number } | null> {
+    const seq = ++this.loadSeq
     await this.unlock()
     const ctx = this.ctx!
-    let buffer: AudioBuffer | null = null
+    const minSeconds = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : 0
+
+    let audio: DecodedAudio | null = null
+    let hasAudio = false
     try {
-      buffer = await ctx.decodeAudioData(await file.arrayBuffer())
+      audio = await streamAudio(file, minSeconds)
+      hasAudio = !!audio
     } catch (err) {
-      console.warn('No decodable audio track, using silence', err)
+      console.info('[audio] streaming decode unavailable, trying decodeAudioData:', err)
+      audio = await this.decodeWhole(file, minSeconds)
+      hasAudio = !!audio
     }
+    // A slower, older load must not overwrite the newer file's audio.
+    if (seq !== this.loadSeq) return null
 
-    let channels: Float32Array[]
-    if (buffer && buffer.length > 1) {
-      channels = []
-      for (let c = 0; c < Math.min(buffer.numberOfChannels, 2); c++) {
-        // Copy so the transfer below doesn't detach the AudioBuffer's memory.
-        channels.push(buffer.getChannelData(c).slice())
-      }
-    } else {
-      const seconds = Number.isFinite(fallbackDuration) && fallbackDuration > 0 ? fallbackDuration : 1
-      channels = [new Float32Array(Math.ceil(seconds * ctx.sampleRate))]
+    audio ??= {
+      channels: [new Float32Array(Math.ceil(Math.max(minSeconds, 1) * ctx.sampleRate))],
+      sampleRate: ctx.sampleRate,
     }
-
-    this.duration = channels[0].length / ctx.sampleRate
+    const { channels, sampleRate } = audio
+    this.duration = channels[0].length / sampleRate
     this.time = 0
     this.rate = 0
     this.playing = false
-    this.post({ type: 'load', channels }, channels.map((c) => c.buffer as ArrayBuffer))
-    return { hasAudio: !!buffer && buffer.length > 1, duration: this.duration }
+    this.post({ type: 'load', channels, sampleRate }, channels.map((c) => c.buffer as ArrayBuffer))
+    return { hasAudio, duration: this.duration }
+  }
+
+  /** Whole-file decode: needs the file in memory, so only for modest sizes. */
+  private async decodeWhole(file: Blob, minSeconds: number): Promise<DecodedAudio | null> {
+    if (file.size > MAX_WHOLE_DECODE_BYTES) return null
+    const ctx = this.ctx!
+    try {
+      const buffer = await ctx.decodeAudioData(await file.arrayBuffer())
+      if (buffer.length < 2) return null
+      const length = Math.max(buffer.length, Math.ceil(minSeconds * buffer.sampleRate))
+      const channels = Array.from({ length: Math.min(buffer.numberOfChannels, 2) }, (_, c) => {
+        const ch = new Float32Array(length)
+        ch.set(buffer.getChannelData(c))
+        return ch
+      })
+      return { channels, sampleRate: buffer.sampleRate }
+    } catch (err) {
+      console.warn('No decodable audio track, using silence', err)
+      return null
+    }
   }
 
   /** Scrub: the playhead follows `t` as closely as the finger moves. */

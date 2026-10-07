@@ -1,7 +1,7 @@
 import './style.css'
 import { AudioEngine } from './audioEngine'
 import { FrameCache } from './frameCache'
-import { loadLastVideo, saveLastVideo } from './lastVideo'
+import { clearLastVideo, loadLastVideo, saveLastVideo } from './lastVideo'
 import { canRecord, openRecorder } from './recorder'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -49,7 +49,7 @@ if (!canRecord()) document.querySelectorAll('[data-act="record"]').forEach((b) =
 // ---------------------------------------------------------------------------
 // Loading
 
-async function loadFile(file: File, { restored = false } = {}) {
+async function loadFile(file: File, { restored = false, mirrored = false } = {}) {
   if (!file.type.startsWith('video/') && !/\.(mp4|mov|m4v|webm|mkv|3gp)$/i.test(file.name)) {
     toast('영상 파일만 돼요')
     return
@@ -74,14 +74,17 @@ async function loadFile(file: File, { restored = false } = {}) {
   } catch {
     if (token !== loadToken) return
     setLoading(null)
-    toast('이 영상은 브라우저가 못 읽어요 😢')
+    showEmpty()
+    if (restored) void clearLastVideo()
+    else toast('이 영상은 브라우저가 못 읽어요 😢')
     return
   }
   if (token !== loadToken) return
 
   setLoading('소리 뽑는 중…')
-  const { hasAudio, duration } = await engine.load(file, video.duration)
-  if (token !== loadToken) return
+  const audio = await engine.load(file, video.duration)
+  if (!audio || token !== loadToken) return
+  const { hasAudio, duration } = audio
 
   // iOS doesn't paint a paused video until it has played once.
   video.play().then(() => video.pause()).catch(() => {})
@@ -91,12 +94,14 @@ async function loadFile(file: File, { restored = false } = {}) {
   setLoading(null)
   app.classList.add('loaded')
   $('filename').textContent = file.name
+  app.classList.toggle('mirrored', mirrored)
   $('empty').hidden = true
   $('top').hidden = false
   $('bottom').hidden = false
   $('hint').hidden = false
   if (!hasAudio) toast('소리가 없는 영상이에요')
-  if (!restored) void saveLastVideo(file)
+  if (!restored) void saveLastVideo(file, mirrored)
+  void keepAwake()
 
   cache = new FrameCache(file, objectUrl, duration, video.videoWidth, video.videoHeight)
   const c = cache
@@ -114,10 +119,42 @@ async function loadFile(file: File, { restored = false } = {}) {
   })
 }
 
+// Offline support / installable app (production builds only).
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  void navigator.serviceWorker.register('./sw.js').catch(() => {})
+}
+
 // Reopen whatever was loaded last time. Audio still unlocks on the first touch.
-void loadLastVideo().then((file) => {
-  if (file && !loaded && loadToken === 0) void loadFile(file, { restored: true })
+void loadLastVideo().then((last) => {
+  if (last && !loaded && loadToken === 0) void loadFile(last.file, { restored: true, mirrored: last.mirrored })
 })
+
+// Keep the screen on while a video is open. The lock drops whenever the page
+// is hidden, so it is taken again on return.
+let wakeLock: WakeLockSentinel | null = null
+async function keepAwake() {
+  if (!loaded || wakeLock || document.visibilityState !== 'visible' || !('wakeLock' in navigator)) return
+  try {
+    wakeLock = await navigator.wakeLock.request('screen')
+    wakeLock.addEventListener('release', () => (wakeLock = null))
+  } catch {
+    // Not allowed right now (e.g. battery saver); harmless.
+  }
+}
+document.addEventListener('visibilitychange', () => void keepAwake())
+
+/** Back to the start screen (e.g. after a file failed to open). */
+function showEmpty() {
+  app.classList.remove('loaded')
+  video.removeAttribute('src')
+  video.load()
+  setCanvasVisible(false)
+  $('empty').hidden = false
+  $('top').hidden = true
+  $('bottom').hidden = true
+  $('hint').hidden = true
+  $('prep').hidden = true
+}
 
 function setLoading(msg: string | null) {
   const el = $('loading')
@@ -151,7 +188,7 @@ app.addEventListener('click', (e) => {
   } else if (act === 'record') {
     engine.unlock()
     engine.pause()
-    void openRecorder(app).then((file) => file && loadFile(file))
+    void openRecorder(app).then((rec) => rec && loadFile(rec.file, { mirrored: rec.mirrored }))
   } else if (act === 'play') {
     togglePlay()
   } else if (act === 'settings') {

@@ -3,6 +3,9 @@
 // a shape), only smoothed enough to bridge the gaps between pointer events.
 // Sound is rendered as short overlapping windowed grains read at the original
 // speed in the direction of motion, so the pitch never changes.
+//
+// The PCM keeps its own sample rate; `step` converts between source samples
+// and output samples, so no resampling pass is needed up front.
 
 declare const sampleRate: number
 declare function registerProcessor(name: string, ctor: unknown): void
@@ -11,7 +14,7 @@ declare class AudioWorkletProcessor {
 }
 
 export type WorkletInMessage =
-  | { type: 'load'; channels: Float32Array[] }
+  | { type: 'load'; channels: Float32Array[]; sampleRate: number }
   | { type: 'target'; t: number }
   | { type: 'seek'; t: number }
   | { type: 'play' }
@@ -36,6 +39,9 @@ const REPORT_EVERY_BLOCKS = 2
 class ScrubProcessor extends AudioWorkletProcessor {
   private channels: Float32Array[] = []
   private length = 0
+  private srcRate = sampleRate
+  /** Source samples per output sample. */
+  private step = 1
   private pos = 0
   private target = 0
   private rate = 0
@@ -73,16 +79,18 @@ class ScrubProcessor extends AudioWorkletProcessor {
       case 'load':
         this.channels = msg.channels
         this.length = msg.channels[0]?.length ?? 0
+        this.srcRate = msg.sampleRate
+        this.step = msg.sampleRate / sampleRate
         this.pos = this.target = this.rate = this.gain = 0
         this.playing = false
         this.grainAge.fill(-1)
         break
       case 'target':
         this.playing = false
-        this.target = this.clampPos(msg.t * sampleRate)
+        this.target = this.clampPos(msg.t * this.srcRate)
         break
       case 'seek':
-        this.pos = this.target = this.clampPos(msg.t * sampleRate)
+        this.pos = this.target = this.clampPos(msg.t * this.srcRate)
         this.rate = 0
         this.gain = 0
         break
@@ -109,10 +117,11 @@ class ScrubProcessor extends AudioWorkletProcessor {
     }
 
     for (let i = 0; i < frames; i++) {
-      const desired = this.playing ? 1 : (this.target - this.pos) * this.followAlpha
+      // Speed in real-time units (1 = normal playback, negative = backwards).
+      const desired = this.playing ? 1 : ((this.target - this.pos) * this.followAlpha) / this.step
       this.rate += (desired - this.rate) * this.rateAlpha
 
-      let pos = this.pos + this.rate
+      let pos = this.pos + this.rate * this.step
       if (pos <= 0) {
         pos = 0
         this.rate = 0
@@ -146,7 +155,7 @@ class ScrubProcessor extends AudioWorkletProcessor {
         const age = this.grainAge[g]
         if (age < 0) continue
         const w = this.window[age] * this.gain
-        let p = this.grainStart[g] + this.grainDir[g] * age
+        let p = this.grainStart[g] + this.grainDir[g] * age * this.step
         if (p < 0) p = 0
         else if (p > last) p = last
         const i0 = p | 0
@@ -164,7 +173,7 @@ class ScrubProcessor extends AudioWorkletProcessor {
       this.blockCount = 0
       this.port.postMessage({
         type: 'pos',
-        t: this.pos / sampleRate,
+        t: this.pos / this.srcRate,
         rate: this.rate,
         playing: this.playing,
       } satisfies WorkletOutMessage)

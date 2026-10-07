@@ -1,8 +1,10 @@
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# scrubber
+# moving
 
 Drop a video, grab the screen and drag left/right: the picture **and the sound** scrub with your finger, backwards included. Works on desktop and mobile, and can record a clip in the browser.
+
+Live at **https://moving.marierie.net** (GitHub Pages, deployed by `.github/workflows/deploy.yml` on every push to `main`).
 
 ```sh
 pnpm install

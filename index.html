@@ -5,9 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#0b0b0f" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="icon" href="/icon.svg" />
-    <title>scrubber</title>
+    <meta name="apple-mobile-web-app-title" content="moving" />
+    <title>moving</title>
+    <meta name="description" content="영상을 잡고 앞뒤로 끌면 소리까지 따라 움직여요" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-180.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://moving.marierie.net/" />
+    <meta property="og:title" content="moving" />
+    <meta property="og:description" content="영상을 잡고 앞뒤로 끌면 소리까지 따라 움직여요" />
+    <meta property="og:image" content="https://moving.marierie.net/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body>
     <main id="app">
@@ -20,8 +34,7 @@
       <div id="hint" class="hint" hidden>← 화면을 잡고 좌우로 끌어보세요 →</div>
 
       <section id="empty" class="empty">
-        <img src="/icon.svg" alt="" width="56" height="56" />
-        <h1>scrubber</h1>
+        <h1>moving</h1>
         <p class="desktop-only">영상을 아무 데나 던지세요</p>
         <p class="mobile-only">영상을 고르거나 바로 찍어보세요</p>
         <div class="empty-actions">
@@ -92,7 +105,10 @@
       <div id="toast" class="toast" hidden></div>
       <div id="drop" class="drop" hidden><span>놓으면 바로 시작</span></div>
 
-      <input id="file" type="file" accept="video/*" hidden />
+      <!-- Listing extensions too keeps Android Chrome off its photo picker, which
+           renames files to numeric media IDs (e.g. 1000017078.mp4); the system file
+           chooser it opens instead passes the real file name through. -->
+      <input id="file" type="file" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv,.3gp" hidden />
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
