@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#0b0b0f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" href="/icon.svg" />
+    <title>scrubber</title>
+  </head>
+  <body>
+    <main id="app">
+      <div id="stage">
+        <video id="video" playsinline muted preload="auto"></video>
+        <canvas id="canvas"></canvas>
+      </div>
+
+      <div id="prep" class="prep" aria-live="polite" hidden></div>
+      <div id="hint" class="hint" hidden>← 화면을 잡고 좌우로 끌어보세요 →</div>
+
+      <section id="empty" class="empty">
+        <img src="/icon.svg" alt="" width="56" height="56" />
+        <h1>scrubber</h1>
+        <p class="desktop-only">영상을 아무 데나 던지세요</p>
+        <p class="mobile-only">영상을 고르거나 바로 찍어보세요</p>
+        <div class="empty-actions">
+          <button class="primary" data-act="open">영상 불러오기</button>
+          <button class="secondary" data-act="record">바로 녹화</button>
+        </div>
+        <p class="fineprint">영상은 이 기기 밖으로 나가지 않아요</p>
+      </section>
+
+      <header id="top" class="top" hidden>
+        <span id="filename" class="filename"></span>
+        <div class="top-actions">
+          <button id="menu-btn" class="ghost round" data-act="menu" aria-label="메뉴" title="메뉴" aria-haspopup="menu" aria-expanded="false" aria-controls="menu">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M6 14q-.825 0-1.412-.587T4 12t.588-1.412T6 10t1.413.588T8 12t-.587 1.413T6 14m6 0q-.825 0-1.412-.587T10 12t.588-1.412T12 10t1.413.588T14 12t-.587 1.413T12 14m6 0q-.825 0-1.412-.587T16 12t.588-1.412T18 10t1.413.588T20 12t-.587 1.413T18 14"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="menu" class="menu" role="menu" aria-label="메뉴" hidden>
+        <button role="menuitem" data-act="open">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M17.525 10.625q.35-.225.35-.625t-.35-.625L12.65 6.25q-.375-.25-.763-.038t-.387.663v6.25q0 .45.388.663t.762-.038zM8 18q-.825 0-1.412-.587T6 16V4q0-.825.588-1.412T8 2h12q.825 0 1.413.588T22 4v12q0 .825-.587 1.413T20 18zm-4 4q-.825 0-1.412-.587T2 20V7q0-.425.288-.712T3 6t.713.288T4 7v13h13q.425 0 .713.288T18 21t-.288.713T17 22z"/></svg>
+          <span>다른 영상 열기</span>
+        </button>
+        <button role="menuitem" data-act="record">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M4 20q-.825 0-1.412-.587T2 18V6q0-.825.588-1.412T4 4h12q.825 0 1.413.588T18 6v4.5l3.15-3.15q.25-.25.55-.125t.3.475v8.6q0 .35-.3.475t-.55-.125L18 13.5V18q0 .825-.587 1.413T16 20z"/></svg>
+          <span>녹화하기</span>
+        </button>
+        <button role="menuitem" data-act="settings">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M10.825 22q-.675 0-1.162-.45t-.588-1.1L8.85 18.8q-.325-.125-.612-.3t-.563-.375l-1.55.65q-.625.275-1.25.05t-.975-.8l-1.175-2.05q-.35-.575-.2-1.225t.675-1.075l1.325-1Q4.5 12.5 4.5 12.337v-.675q0-.162.025-.337l-1.325-1Q2.675 9.9 2.525 9.25t.2-1.225L3.9 5.975q.35-.575.975-.8t1.25.05l1.55.65q.275-.2.575-.375t.6-.3l.225-1.65q.1-.65.588-1.1T10.825 2h2.35q.675 0 1.163.45t.587 1.1l.225 1.65q.325.125.613.3t.562.375l1.55-.65q.625-.275 1.25-.05t.975.8l1.175 2.05q.35.575.2 1.225t-.675 1.075l-1.325 1q.025.175.025.338v.674q0 .163-.05.338l1.325 1q.525.425.675 1.075t-.2 1.225l-1.2 2.05q-.35.575-.975.8t-1.25-.05l-1.5-.65q-.275.2-.575.375t-.6.3l-.225 1.65q-.1.65-.587 1.1t-1.163.45zm1.225-6.5q1.45 0 2.475-1.025T15.55 12t-1.025-2.475T12.05 8.5q-1.475 0-2.488 1.025T8.55 12t1.013 2.475T12.05 15.5"/></svg>
+          <span>설정</span>
+        </button>
+      </div>
+
+      <div id="settings" class="settings" role="dialog" aria-label="설정" hidden>
+        <div class="setting">
+          <label for="sensitivity" class="setting-label">감도</label>
+          <div class="setting-slider">
+            <span class="setting-icon" role="img" aria-label="느리게" title="느리게"><svg viewBox="0 0 24 24"><path fill="currentColor" d="m15.53 5.437l5.426 5.437a3.576 3.576 0 0 1 0 5.049a3.56 3.56 0 0 1-3.342.95v.124a2 2 0 0 1-2 2.003h-2.11l.001-.748l-.005-.168a2.75 2.75 0 0 0-2.57-2.58l-.174-.006h-1l-.101.007a.751.751 0 0 0 0 1.488l.102.007h1l.127.007a1.25 1.25 0 0 1 1.115 1.117l.007.128l-.001.748h-5a2 2 0 0 1-1.998-2.003v-2.504q0-.286.034-.562q-.261.06-.542.06A2.5 2.5 0 0 1 2 11.489a2.5 2.5 0 0 1 2.499-2.504a2.5 2.5 0 0 1 2.407 1.83a4.46 4.46 0 0 1 2.599-.829h3.611c.603 0 1.179.12 1.705.335a4.2 4.2 0 0 1 .597-.779l-1.992-1.995a1.494 1.494 0 0 1 0-2.11a1.486 1.486 0 0 1 2.105 0"/></svg></span>
+            <input id="sensitivity" type="range" min="0" max="1000" step="1" />
+            <span class="setting-icon" role="img" aria-label="빠르게" title="빠르게"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M21.989 11.946a1.99 1.99 0 0 1-2.05 1.99l-4.738-.139l-3.454 7.143c-.277.574-.86.94-1.498.94a.926.926 0 0 1-.92-1.037l.863-7.193l-3.765-.11l-.49 1.341a1.29 1.29 0 0 1-1.211.847a.9.9 0 0 1-.901-.902V13.35l-.81-.169a1.261 1.261 0 0 1 0-2.469l.81-.168V9.066a.9.9 0 0 1 .788-.894l.113-.007a1.29 1.29 0 0 1 1.21.846l.492 1.34l3.751-.11l-.85-7.084l-.004-.055l-.002-.055c0-.511.415-.926.926-.926c.585 0 1.123.307 1.423.8l.075.14l3.403 7.035l4.79-.14a1.99 1.99 0 0 1 2.048 1.932z"/></svg></span>
+          </div>
+        </div>
+      </div>
+
+      <footer id="bottom" class="bottom" hidden>
+        <div id="timeline" class="timeline">
+          <div class="track">
+            <div id="cached" class="cached"></div>
+            <div id="played" class="played"></div>
+          </div>
+          <div id="handle" class="handle"></div>
+        </div>
+        <div class="controls">
+          <button id="play" class="icon" data-act="play" aria-label="재생">
+            <svg viewBox="0 0 24 24" class="i-play"><path d="M7 4.5v15l13-7.5z" /></svg>
+            <svg viewBox="0 0 24 24" class="i-pause"><path d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>
+          </button>
+          <span id="time" class="time">0:00.0 / 0:00.0</span>
+          <label class="toggle">
+            <input id="autoplay" type="checkbox" />
+            <span class="switch"></span>
+            <span>손 떼면 재생</span>
+          </label>
+        </div>
+      </footer>
+
+      <div id="loading" class="loading" hidden><div class="spinner"></div><span></span></div>
+      <div id="toast" class="toast" hidden></div>
+      <div id="drop" class="drop" hidden><span>놓으면 바로 시작</span></div>
+
+      <input id="file" type="file" accept="video/*" hidden />
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
