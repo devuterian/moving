@@ -8,8 +8,14 @@
 // around the playhead with a little position jitter, stretching that moment
 // into a sustained sound instead of falling silent.
 //
+// Tape mode (advanced): the PCM is read straight at the playhead's speed, like
+// scratching a record, so pitch follows speed. A frozen playhead still uses
+// grains.
+//
 // The PCM keeps its own sample rate; `step` converts between source samples
 // and output samples, so no resampling pass is needed up front.
+
+import { DEFAULT_SCRUB_PARAMS, type ScrubParams } from './scrubParams'
 
 declare const sampleRate: number
 declare function registerProcessor(name: string, ctor: unknown): void
@@ -25,24 +31,17 @@ export type WorkletInMessage =
   | { type: 'pause' }
   /** Finger is down (only sent while the freeze option is on). */
   | { type: 'hold'; on: boolean }
+  | { type: 'params'; params: ScrubParams }
 
 export type WorkletOutMessage =
   | { type: 'pos'; t: number; rate: number; playing: boolean }
   | { type: 'ended' }
 
-// How quickly the playhead catches the finger. Roughly one pointer-event
-// interval: enough to turn 60–120 Hz input into continuous motion.
-const FOLLOW_SECONDS = 0.008
-// Smooths changes of speed (also the ramp in/out of normal playback).
-const RATE_SMOOTH_SECONDS = 0.003
 const GAIN_SMOOTH_SECONDS = 0.006
-// Below this |rate| the output fades out, so a held finger is silent.
-const SILENT_RATE = 0.06
-// Grain length; grains overlap by half so their Hann windows sum to 1.
-const GRAIN_SECONDS = 0.04
-// How far frozen grains wander from the playhead; hides the grain-rate buzz.
-const FREEZE_JITTER_SECONDS = 0.025
 const REPORT_EVERY_BLOCKS = 2
+const MAX_GRAINS = 4
+
+const alphaFor = (ms: number) => 1 - Math.exp(-1 / ((Math.max(ms, 0.05) / 1000) * sampleRate))
 
 class ScrubProcessor extends AudioWorkletProcessor {
   private channels: Float32Array[] = []
@@ -59,25 +58,52 @@ class ScrubProcessor extends AudioWorkletProcessor {
   private lastDir: -1 | 1 = 1
   private blockCount = 0
 
-  private readonly grainLen = Math.round(GRAIN_SECONDS * sampleRate) & ~1
-  private readonly hop = this.grainLen / 2
-  private readonly window = Float32Array.from({ length: this.grainLen }, (_, n) =>
-    0.5 - 0.5 * Math.cos((2 * Math.PI * n) / this.grainLen),
-  )
-  // Two overlapping grain slots: source start, direction (±1), age in samples.
-  private readonly grainStart = new Float64Array(2)
-  private readonly grainDir = new Int8Array(2)
-  private readonly grainAge = new Int32Array([-1, -1])
+  private grainLen = 0
+  private hop = 0
+  private window = new Float32Array(0)
+  private overlap = 2
+  // Overlapping grain slots: source start, direction (±1), age in samples.
+  private readonly grainStart = new Float64Array(MAX_GRAINS)
+  private readonly grainDir = new Int8Array(MAX_GRAINS)
+  private readonly grainAge = new Int32Array(MAX_GRAINS).fill(-1)
   private nextGrain = 0
   private sinceSpawn = 0
 
-  private readonly followAlpha = 1 - Math.exp(-1 / (FOLLOW_SECONDS * sampleRate))
-  private readonly rateAlpha = 1 - Math.exp(-1 / (RATE_SMOOTH_SECONDS * sampleRate))
+  private followAlpha = 0
+  private rateAlpha = 0
   private readonly gainAlpha = 1 - Math.exp(-1 / (GAIN_SMOOTH_SECONDS * sampleRate))
+  private silentRate = 0
+  private jitterSeconds = 0
+  private tape = false
 
   constructor() {
     super()
+    this.setParams(DEFAULT_SCRUB_PARAMS)
     this.port.onmessage = (e: MessageEvent<WorkletInMessage>) => this.handle(e.data)
+  }
+
+  private setParams(p: ScrubParams) {
+    const overlap = p.overlap >= 4 ? 4 : 2
+    const grainLen = Math.max(overlap * 2, Math.round((p.grainMs / 1000) * sampleRate)) & ~3
+    if (grainLen !== this.grainLen || overlap !== this.overlap) {
+      this.grainLen = grainLen
+      this.overlap = overlap
+      this.hop = grainLen / overlap
+      // Hann windows at hop L/k sum to k/2; scale so the overlap sums to 1.
+      const norm = 2 / overlap
+      this.window = Float32Array.from(
+        { length: grainLen },
+        (_, n) => (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / grainLen)) * norm,
+      )
+      this.grainAge.fill(-1)
+      this.nextGrain = 0
+      this.sinceSpawn = 0
+    }
+    this.followAlpha = alphaFor(p.followMs)
+    this.rateAlpha = alphaFor(p.smoothMs)
+    this.silentRate = Math.max(0.001, p.silentRate)
+    this.jitterSeconds = Math.max(0, p.jitterMs) / 1000
+    this.tape = p.tape
   }
 
   private clampPos(samples: number) {
@@ -115,6 +141,9 @@ class ScrubProcessor extends AudioWorkletProcessor {
       case 'hold':
         this.hold = msg.on
         break
+      case 'params':
+        this.setParams(msg.params)
+        break
     }
   }
 
@@ -123,6 +152,7 @@ class ScrubProcessor extends AudioWorkletProcessor {
     const frames = out[0].length
     const src = this.channels
     const last = this.length - 1
+    const grains = this.overlap
 
     if (last < 1) {
       for (const ch of out) ch.fill(0)
@@ -151,17 +181,31 @@ class ScrubProcessor extends AudioWorkletProcessor {
       this.pos = pos
 
       const speed = Math.abs(this.rate)
-      if (speed >= SILENT_RATE) this.lastDir = this.rate < 0 ? -1 : 1
-      const frozen = this.hold && !this.playing && speed < SILENT_RATE
-      const gainTarget = frozen || speed >= SILENT_RATE ? 1 : speed / SILENT_RATE
+      if (speed >= this.silentRate) this.lastDir = this.rate < 0 ? -1 : 1
+      const frozen = this.hold && !this.playing && speed < this.silentRate
+      const gainTarget = frozen || speed >= this.silentRate ? 1 : speed / this.silentRate
       this.gain += (gainTarget - this.gain) * this.gainAlpha
+
+      for (let c = 0; c < out.length; c++) out[c][i] = 0
+
+      if (this.tape && !frozen) {
+        // Straight read at the playhead: pitch follows speed.
+        const i0 = pos | 0
+        const frac = pos - i0
+        const i1 = i0 < last ? i0 + 1 : i0
+        for (let c = 0; c < out.length; c++) {
+          const s = src[c < src.length ? c : 0]
+          out[c][i] = (s[i0] + (s[i1] - s[i0]) * frac) * this.gain
+        }
+        continue
+      }
 
       if (this.sinceSpawn-- <= 0) {
         this.sinceSpawn = this.hop - 1
         const g = this.nextGrain
-        this.nextGrain = g ^ 1
+        this.nextGrain = (g + 1) % grains
         if (frozen) {
-          const jitter = (Math.random() * 2 - 1) * FREEZE_JITTER_SECONDS * this.srcRate
+          const jitter = (Math.random() * 2 - 1) * this.jitterSeconds * this.srcRate
           this.grainStart[g] = Math.min(Math.max(pos + jitter, 0), last)
           this.grainDir[g] = this.lastDir
         } else {
@@ -171,8 +215,7 @@ class ScrubProcessor extends AudioWorkletProcessor {
         this.grainAge[g] = 0
       }
 
-      for (let c = 0; c < out.length; c++) out[c][i] = 0
-      for (let g = 0; g < 2; g++) {
+      for (let g = 0; g < grains; g++) {
         const age = this.grainAge[g]
         if (age < 0) continue
         const w = this.window[age] * this.gain

@@ -23,7 +23,7 @@ import type { FrameWorkerMessage, FrameWorkerRequest } from './frameWorker'
 const isMobile = matchMedia('(pointer: coarse)').matches
 const MB = 1024 * 1024
 /** Raw RGBA bitmaps: every pixel costs 4 bytes, so resolution drops fast. */
-const RAW_LIMITS: PlanLimits = {
+const BASE_RAW_LIMITS: PlanLimits = {
   budgetBytes: (isMobile ? 160 : 480) * MB,
   bytesPerPixel: 4,
   maxEdge: isMobile ? 480 : 854,
@@ -32,7 +32,7 @@ const RAW_LIMITS: PlanLimits = {
   minFps: 12,
 }
 /** Key-frame chunks: ~0.05 bytes per pixel at the worker's bitrate. */
-const ENCODED_LIMITS: PlanLimits = {
+const BASE_ENCODED_LIMITS: PlanLimits = {
   budgetBytes: (isMobile ? 120 : 300) * MB,
   bytesPerPixel: 0.07,
   maxEdge: isMobile ? 640 : 854,
@@ -40,6 +40,15 @@ const ENCODED_LIMITS: PlanLimits = {
   maxFps: isMobile ? 30 : 60,
   minFps: 12,
 }
+/** Settings → Advanced can raise or lower the long-edge cap (next file on). */
+let maxEdgeOverride: number | null = null
+export function setFrameMaxEdge(edge: number | null) {
+  maxEdgeOverride = edge
+}
+const withEdge = (l: PlanLimits): PlanLimits => (maxEdgeOverride ? { ...l, maxEdge: maxEdgeOverride } : l)
+const rawLimits = () => withEdge(BASE_RAW_LIMITS)
+const encodedLimits = () => withEdge(BASE_ENCODED_LIMITS)
+
 /** Decoded frames kept around the playhead in encoded mode. */
 const DECODED_CACHE_BYTES = (isMobile ? 48 : 128) * MB
 const PREFETCH_AHEAD = 16
@@ -220,7 +229,7 @@ export class FrameCache {
   ) {
     // Provisional plan from the <video> element; the worker replaces it with
     // one based on the real frame rate before any frame arrives.
-    this.setRawPlan(planFrames(videoWidth, videoHeight, duration, 30, RAW_LIMITS))
+    this.setRawPlan(planFrames(videoWidth, videoHeight, duration, 30, rawLimits()))
   }
 
   get coverage() {
@@ -323,7 +332,7 @@ export class FrameCache {
           case 'unsupported':
             console.info('[frames] WebCodecs unavailable:', msg.reason)
             // Start over with the <video> fallback.
-            this.setRawPlan(planFrames(this.videoWidth, this.videoHeight, this.duration, 30, RAW_LIMITS))
+            this.setRawPlan(planFrames(this.videoWidth, this.videoHeight, this.duration, 30, rawLimits()))
             finish(false)
             break
           case 'done':
@@ -332,7 +341,7 @@ export class FrameCache {
             break
         }
       }
-      worker.postMessage({ file: this.file, encoded: ENCODED_LIMITS, raw: RAW_LIMITS } satisfies FrameWorkerRequest)
+      worker.postMessage({ file: this.file, encoded: encodedLimits(), raw: rawLimits() } satisfies FrameWorkerRequest)
     })
   }
 

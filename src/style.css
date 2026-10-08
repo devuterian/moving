@@ -138,6 +138,7 @@ button:disabled {
 .empty {
   position: absolute;
   inset: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -161,12 +162,125 @@ button:disabled {
   color: var(--muted);
 }
 
-.empty-actions {
-  display: flex;
+/* Home: a bento grid of big M3-style tiles. */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 112px;
   gap: 10px;
+  width: min(620px, 100%);
   margin: 20px 0 8px;
-  flex-wrap: wrap;
-  justify-content: center;
+  text-align: left;
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+  padding: 16px 18px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+  transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1), border-radius 0.18s, background 0.18s;
+}
+
+.tile:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.tile:active {
+  transform: scale(0.97);
+  border-radius: 20px;
+}
+
+.tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tile svg {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  width: 28px;
+  height: 28px;
+}
+
+.tile-title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.tile-sub {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-open {
+  grid-column: span 2;
+  grid-row: span 2;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.tile-open:hover {
+  background: #d4ff4f;
+}
+
+.tile-open svg {
+  width: 44px;
+  height: 44px;
+}
+
+.tile-open .tile-title {
+  font-size: 22px;
+}
+
+.tile-open .tile-sub {
+  color: rgba(11, 11, 15, 0.65);
+}
+
+.tile-last {
+  grid-column: span 2;
+  background: rgba(197, 248, 42, 0.12);
+}
+
+.tile-last svg {
+  color: var(--accent);
+}
+
+.tile[hidden] {
+  display: none;
+}
+
+/* Without a last file, the record tiles fill its row too. */
+.no-last .tile-rec,
+.no-last .tile-mic {
+  grid-row: span 2;
+}
+
+.tile-link {
+  grid-column: span 4;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding-left: 60px;
+}
+
+.tile-link svg {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .primary,
@@ -198,7 +312,6 @@ button:disabled {
 @media (pointer: coarse) {
   .desktop-only { display: none; }
   .mobile-only { display: block; }
-  .empty-actions { flex-direction: column; width: min(320px, 100%); }
   .primary, .secondary { width: 100%; padding: 16px; }
 }
 
@@ -476,7 +589,7 @@ button:disabled {
   width: min(300px, calc(100vw - 32px));
   padding: 16px;
   border-radius: 16px;
-  background: rgba(24, 24, 32, 0.88);
+  background: rgba(24, 24, 32, 0.97);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
@@ -763,4 +876,123 @@ html:not(.next) .next-only {
 .linkbox .fineprint {
   margin: 0;
   color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  .bento {
+    grid-template-columns: repeat(2, 1fr);
+    grid-auto-rows: 104px;
+  }
+
+
+  .tile-link {
+    grid-column: span 2;
+  }
+
+  .no-last .tile-rec,
+  .no-last .tile-mic {
+    grid-row: span 1;
+  }
+}
+
+/* Settings → Advanced ---------------------------------------------------- */
+
+.settings {
+  max-height: calc(100dvh - var(--safe-top) - 160px);
+  overflow-y: auto;
+}
+
+.advanced summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced summary::after {
+  content: '';
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 0.2s;
+}
+
+.advanced[open] summary::after {
+  transform: rotate(-135deg);
+}
+
+.advanced summary svg {
+  width: 20px;
+  height: 20px;
+  color: var(--muted);
+}
+
+.advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.adv-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.adv-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.adv-head output {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.adv-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.adv-title {
+  display: block;
+  font-size: 13px;
+}
+
+.adv-row input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.adv-row select {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+}
+
+.settings .adv-toggle {
+  gap: 12px;
+  color: inherit;
+}
+
+.adv-reset {
+  min-width: 0;
+  padding: 10px;
+  font-size: 13px;
 }

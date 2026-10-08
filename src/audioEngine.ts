@@ -2,6 +2,7 @@ import workletUrl from './scrub-worklet.ts?worker&url'
 import type { WorkletInMessage, WorkletOutMessage } from './scrub-worklet'
 import { streamAudio, type DecodedAudio } from './audioDecode'
 import { computePeaks } from './waveform'
+import { DEFAULT_SCRUB_PARAMS, type ScrubParams } from './scrubParams'
 
 const isMobile = matchMedia('(pointer: coarse)').matches
 /** decodeAudioData needs the whole file in memory; past this, go silent instead. */
@@ -60,6 +61,7 @@ export class AudioEngine {
   /** Gain that would normalise the loaded track; applied while `normalize` is on. */
   private trackGain = 1
   private normalizeOn = true
+  private params: ScrubParams = DEFAULT_SCRUB_PARAMS
   private ready: Promise<void> | null = null
   private loadSeq = 0
 
@@ -105,6 +107,7 @@ export class AudioEngine {
     }
     this.output = new GainNode(ctx, { gain: this.normalizeOn ? this.trackGain : 1 })
     this.node.connect(this.output).connect(ctx.destination)
+    this.post({ type: 'params', params: this.params })
   }
 
   /**
@@ -185,6 +188,12 @@ export class AudioEngine {
   seek(t: number) {
     this.time = this.clamp(t)
     this.post({ type: 'seek', t: this.time })
+  }
+
+  /** Advanced scrub tunables (grain size, follow speed, tape mode, ...). */
+  setParams(params: ScrubParams) {
+    this.params = { ...params }
+    this.post({ type: 'params', params: this.params })
   }
 
   /** Loudness normalisation on or off (smoothly, so it never clicks). */

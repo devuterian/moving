@@ -5,6 +5,7 @@ import { clearLastVideo, loadLastVideo, saveLastVideo } from './lastVideo'
 import { canRecord, openRecorder } from './recorder'
 import { fetchLinkVideo, parseLink } from './linkImport'
 import { Waveform } from './waveform'
+import { initAdvanced } from './advanced'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -52,6 +53,8 @@ autoplayToggle.checked = localStorage.getItem(AUTOPLAY_KEY) === '1'
 autoplayToggle.addEventListener('change', () =>
   localStorage.setItem(AUTOPLAY_KEY, autoplayToggle.checked ? '1' : '0'),
 )
+
+initAdvanced($('advanced'), engine)
 
 // Loudness normalisation, on unless turned off.
 const NORMALIZE_KEY = 'scrubber:normalize'
@@ -115,7 +118,7 @@ async function loadFile(file: File, { restored = false, mirrored = false } = {})
       if (token !== loadToken) return
       setLoading(null)
       showEmpty()
-      if (restored) void clearLastVideo()
+      if (restored) forgetLastFile()
       else toast('이 영상은 브라우저가 못 읽어요 😢')
       return
     }
@@ -136,7 +139,7 @@ async function loadFile(file: File, { restored = false, mirrored = false } = {})
     if (!hasAudio || !engine.peaks) {
       setLoading(null)
       showEmpty()
-      if (restored) void clearLastVideo()
+      if (restored) forgetLastFile()
       else toast('이 소리 파일은 브라우저가 못 읽어요 😢')
       return
     }
@@ -188,9 +191,21 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   void navigator.serviceWorker.register(NEXT ? '../sw.js' : './sw.js').catch(() => {})
 }
 
-// Reopen whatever was loaded last time. Audio still unlocks on the first touch.
+function forgetLastFile() {
+  lastFile = null
+  void clearLastVideo()
+  $('tile-last').hidden = true
+  $('bento').classList.add('no-last')
+}
+
+// The home screen offers to reopen whatever was loaded last time.
+let lastFile: Awaited<ReturnType<typeof loadLastVideo>> = null
 void loadLastVideo().then((last) => {
-  if (last && !loaded && loadToken === 0) void loadFile(last.file, { restored: true, mirrored: last.mirrored })
+  if (!last) return
+  lastFile = last
+  $('tile-last-name').textContent = last.file.name
+  $('tile-last').hidden = false
+  $('bento').classList.remove('no-last')
 })
 
 // Keep the screen on while a video is open. The lock drops whenever the page
@@ -260,6 +275,8 @@ app.addEventListener('click', (e) => {
     togglePlay()
   } else if (act === 'settings') {
     setSettingsOpen(true)
+  } else if (act === 'open-last') {
+    if (lastFile) void loadFile(lastFile.file, { restored: true, mirrored: lastFile.mirrored })
   } else if (act === 'link') {
     setLinkOpen(true)
   } else if (act === 'link-close') {
@@ -386,7 +403,10 @@ sensitivity.addEventListener('input', () => {
 
 function setSettingsOpen(open: boolean) {
   $('settings').hidden = !open
-  if (open) sensitivity.focus()
+  if (open) {
+    $('hint').hidden = true
+    sensitivity.focus()
+  }
 }
 
 // Tapping anywhere else only closes the menu / settings popover: the tap is
