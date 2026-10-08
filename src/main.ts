@@ -14,6 +14,7 @@ const ctx2d = canvas.getContext('2d', { desynchronized: true })!
 const fileInput = $<HTMLInputElement>('file')
 const timeline = $('timeline')
 const autoplayToggle = $<HTMLInputElement>('autoplay')
+const freezeToggle = $<HTMLInputElement>('freeze')
 
 /** Sensitivity: seconds of media per screen width of drag (log slider). */
 const MIN_SECONDS_PER_SCREEN = 0.5
@@ -42,6 +43,12 @@ const AUTOPLAY_KEY = 'scrubber:autoplay'
 autoplayToggle.checked = localStorage.getItem(AUTOPLAY_KEY) === '1'
 autoplayToggle.addEventListener('change', () =>
   localStorage.setItem(AUTOPLAY_KEY, autoplayToggle.checked ? '1' : '0'),
+)
+
+const FREEZE_KEY = 'scrubber:freeze'
+freezeToggle.checked = localStorage.getItem(FREEZE_KEY) === '1'
+freezeToggle.addEventListener('change', () =>
+  localStorage.setItem(FREEZE_KEY, freezeToggle.checked ? '1' : '0'),
 )
 
 if (!canRecord()) document.querySelectorAll('[data-act="record"]').forEach((b) => b.remove())
@@ -321,12 +328,15 @@ function beginScrub() {
   app.classList.add('dragging')
   target = engine.time
   engine.scrubTo(target)
+  // Freeze: a finger held still keeps sounding instead of going silent.
+  engine.hold(freezeToggle.checked)
   $('hint').hidden = true
 }
 
 function endScrub(resume: boolean) {
   scrubbing = false
   app.classList.remove('dragging')
+  engine.hold(false)
   if (resume) engine.play()
 }
 

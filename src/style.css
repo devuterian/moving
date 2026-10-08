@@ -339,13 +339,21 @@ button:disabled {
 }
 
 .time {
+  white-space: nowrap;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
 
-.toggle {
+.toggles {
   margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 16px;
+}
+
+.toggle {
   display: flex;
   align-items: center;
   gap: 8px;

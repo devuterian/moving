@@ -130,6 +130,11 @@ export class AudioEngine {
     this.post({ type: 'seek', t: this.time })
   }
 
+  /** Freeze: while on, a still playhead keeps sounding (stretched). */
+  hold(on: boolean) {
+    this.post({ type: 'hold', on })
+  }
+
   play() {
     if (this.time >= this.duration - 0.01) this.time = 0
     this.playing = true

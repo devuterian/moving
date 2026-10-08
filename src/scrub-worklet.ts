@@ -4,6 +4,10 @@
 // Sound is rendered as short overlapping windowed grains read at the original
 // speed in the direction of motion, so the pitch never changes.
 //
+// Freeze (optional): while the finger is held still, grains keep spawning
+// around the playhead with a little position jitter, stretching that moment
+// into a sustained sound instead of falling silent.
+//
 // The PCM keeps its own sample rate; `step` converts between source samples
 // and output samples, so no resampling pass is needed up front.
 
@@ -19,6 +23,8 @@ export type WorkletInMessage =
   | { type: 'seek'; t: number }
   | { type: 'play' }
   | { type: 'pause' }
+  /** Finger is down (only sent while the freeze option is on). */
+  | { type: 'hold'; on: boolean }
 
 export type WorkletOutMessage =
   | { type: 'pos'; t: number; rate: number; playing: boolean }
@@ -34,6 +40,8 @@ const GAIN_SMOOTH_SECONDS = 0.006
 const SILENT_RATE = 0.06
 // Grain length; grains overlap by half so their Hann windows sum to 1.
 const GRAIN_SECONDS = 0.04
+// How far frozen grains wander from the playhead; hides the grain-rate buzz.
+const FREEZE_JITTER_SECONDS = 0.025
 const REPORT_EVERY_BLOCKS = 2
 
 class ScrubProcessor extends AudioWorkletProcessor {
@@ -47,6 +55,8 @@ class ScrubProcessor extends AudioWorkletProcessor {
   private rate = 0
   private gain = 0
   private playing = false
+  private hold = false
+  private lastDir: -1 | 1 = 1
   private blockCount = 0
 
   private readonly grainLen = Math.round(GRAIN_SECONDS * sampleRate) & ~1
@@ -102,6 +112,9 @@ class ScrubProcessor extends AudioWorkletProcessor {
         this.playing = false
         this.target = this.pos
         break
+      case 'hold':
+        this.hold = msg.on
+        break
     }
   }
 
@@ -138,15 +151,23 @@ class ScrubProcessor extends AudioWorkletProcessor {
       this.pos = pos
 
       const speed = Math.abs(this.rate)
-      const gainTarget = speed >= SILENT_RATE ? 1 : speed / SILENT_RATE
+      if (speed >= SILENT_RATE) this.lastDir = this.rate < 0 ? -1 : 1
+      const frozen = this.hold && !this.playing && speed < SILENT_RATE
+      const gainTarget = frozen || speed >= SILENT_RATE ? 1 : speed / SILENT_RATE
       this.gain += (gainTarget - this.gain) * this.gainAlpha
 
       if (this.sinceSpawn-- <= 0) {
         this.sinceSpawn = this.hop - 1
         const g = this.nextGrain
         this.nextGrain = g ^ 1
-        this.grainStart[g] = pos
-        this.grainDir[g] = this.rate < 0 ? -1 : 1
+        if (frozen) {
+          const jitter = (Math.random() * 2 - 1) * FREEZE_JITTER_SECONDS * this.srcRate
+          this.grainStart[g] = Math.min(Math.max(pos + jitter, 0), last)
+          this.grainDir[g] = this.lastDir
+        } else {
+          this.grainStart[g] = pos
+          this.grainDir[g] = this.rate < 0 ? -1 : 1
+        }
         this.grainAge[g] = 0
       }
 
