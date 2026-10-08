@@ -10,7 +10,7 @@ const app = $('app')
 const stage = $('stage')
 const video = $<HTMLVideoElement>('video')
 const canvas = $<HTMLCanvasElement>('canvas')
-const ctx2d = canvas.getContext('2d', { desynchronized: true })!
+const ctx2d = canvas.getContext('2d')!
 const fileInput = $<HTMLInputElement>('file')
 const timeline = $('timeline')
 const autoplayToggle = $<HTMLInputElement>('autoplay')
@@ -522,7 +522,15 @@ function drawFrame(frame: CanvasImageSource, fw: number, fh: number) {
   const h = fh * scale
   const x = (cw - w) / 2
   const y = (ch - h) / 2
-  ctx2d.clearRect(0, 0, cw, ch)
+  // Clear only the letterbox: clearing under the picture can flash through.
+  if (x > 0) {
+    ctx2d.clearRect(0, 0, Math.ceil(x), ch)
+    ctx2d.clearRect(Math.floor(cw - x), 0, Math.ceil(x), ch)
+  }
+  if (y > 0) {
+    ctx2d.clearRect(0, 0, cw, Math.ceil(y))
+    ctx2d.clearRect(0, Math.floor(ch - y), cw, Math.ceil(y))
+  }
   if (!symmetric) {
     ctx2d.drawImage(frame, x, y, w, h)
     return
@@ -549,7 +557,8 @@ const drawBitmap = (frame: ImageBitmap) => drawFrame(frame, frame.width, frame.h
  */
 function showVideo() {
   if (!symmetric) setCanvasVisible(false)
-  else if (video.readyState >= 2 && video.videoWidth) {
+  // A seeking video can hand back a blank picture; keep the last one instead.
+  else if (video.readyState >= 2 && video.videoWidth && !video.seeking) {
     drawFrame(video, video.videoWidth, video.videoHeight)
     setCanvasVisible(true)
   }
