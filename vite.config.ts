@@ -11,6 +11,8 @@ const NEXT_CONNECT = [
   'https://api.fxtwitter.com',
   'https://api.vxtwitter.com',
   'https://video.twimg.com',
+  'https://www.youtube.com/oembed',
+  'https://iv.igerman.cc',
   'https://api.piped.private.coffee',
   'https://proxy.piped.private.coffee',
 ].join(' ')

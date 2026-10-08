@@ -5,14 +5,17 @@
  *
  * - X: fxtwitter / vxtwitter return the tweet's MP4 variants, and
  *   video.twimg.com allows cross-origin downloads. Highest bitrate wins.
- * - YouTube: public Piped instances proxy the muxed (video+audio) stream,
- *   which YouTube only offers up to 360p. Best effort: these instances come
- *   and go, and YouTube blocks them often.
+ * - YouTube: the Invidious companion behind Koutube (iv.igerman.cc) proxies
+ *   the muxed (video+audio) stream with open CORS, falling back to a public
+ *   Piped instance. YouTube only muxes up to 360p. Best effort: YouTube
+ *   blocks these proxies from time to time. The title comes from oEmbed.
  */
 
 type Link = { kind: 'x'; id: string; index: number } | { kind: 'youtube'; id: string }
 
 const X_APIS = ['https://api.fxtwitter.com/status/', 'https://api.vxtwitter.com/i/status/']
+/** Invidious companions; itag 18 is the 360p MP4 with sound. */
+const INVIDIOUS_COMPANIONS = ['https://iv.igerman.cc']
 const PIPED_APIS = ['https://api.piped.private.coffee']
 const API_TIMEOUT_MS = 12000
 
@@ -82,31 +85,58 @@ async function resolveX(id: string, index: number): Promise<Source> {
 
 type PipedStream = { url: string; videoOnly?: boolean; quality?: string; mimeType?: string; height?: number }
 
-async function resolveYouTube(id: string): Promise<Source> {
-  let lastErr: unknown
+async function youtubeTitle(id: string) {
+  try {
+    const data = (await getJson(
+      `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://youtu.be/${id}`)}`,
+    )) as { title?: string }
+    return data.title || id
+  } catch {
+    return id
+  }
+}
+
+/** Every route that might serve this YouTube video, best first. */
+async function* youtubeSources(id: string): AsyncGenerator<Source> {
+  const name = `${await youtubeTitle(id)}.mp4`
+  for (const base of INVIDIOUS_COMPANIONS) {
+    yield { url: `${base}/companion/latest_version?id=${id}&itag=18&local=true`, name }
+  }
   for (const api of PIPED_APIS) {
     try {
-      const data = (await getJson(`${api}/streams/${id}`)) as { title?: string; videoStreams?: PipedStream[] }
+      const data = (await getJson(`${api}/streams/${id}`)) as { videoStreams?: PipedStream[] }
       const muxed = (data.videoStreams ?? []).filter(
         (s) => !s.videoOnly && s.mimeType === 'video/mp4' && /^\d+p/.test(s.quality ?? ''),
       )
       muxed.sort((a, b) => parseInt(b.quality!) - parseInt(a.quality!))
-      if (muxed[0]) return { url: muxed[0].url, name: `${data.title ?? id}.mp4` }
-      throw new Error('no muxed stream')
+      if (muxed[0]) yield { url: muxed[0].url, name }
     } catch (err) {
+      console.info('[link] piped failed', api, err)
+    }
+  }
+}
+
+/** Downloads the linked video. `onProgress` gets bytes so far and the total (0 if unknown). */
+export async function fetchLinkVideo(
+  link: Link,
+  onProgress: (loaded: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<File> {
+  if (link.kind === 'x') return download(await resolveX(link.id, link.index), onProgress, signal)
+  let lastErr: unknown = new Error('no YouTube source')
+  for await (const src of youtubeSources(link.id)) {
+    signal?.throwIfAborted()
+    try {
+      return await download(src, onProgress, signal)
+    } catch (err) {
+      if (signal?.aborted) throw err
       lastErr = err
     }
   }
   throw lastErr
 }
 
-/** Downloads the linked video. `onProgress` gets 0..1, or -1 if size is unknown. */
-export async function fetchLinkVideo(
-  link: Link,
-  onProgress: (p: number) => void,
-  signal?: AbortSignal,
-): Promise<File> {
-  const src = link.kind === 'x' ? await resolveX(link.id, link.index) : await resolveYouTube(link.id)
+async function download(src: Source, onProgress: (loaded: number, total: number) => void, signal?: AbortSignal) {
   const res = await fetch(src.url, { signal, referrerPolicy: 'no-referrer' })
   if (!res.ok || !res.body) throw new Error(`${res.status} download`)
   const total = Number(res.headers.get('content-length')) || 0
@@ -118,7 +148,7 @@ export async function fetchLinkVideo(
     if (done) break
     parts.push(value)
     got += value.byteLength
-    onProgress(total ? got / total : -1)
+    onProgress(got, total)
   }
   if (got < 1024) throw new Error('empty download')
   const name = src.name.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 120)

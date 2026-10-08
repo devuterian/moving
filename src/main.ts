@@ -246,7 +246,12 @@ async function openLink(text: string) {
   try {
     const file = await fetchLinkVideo(
       link,
-      (p) => setLoading(p < 0 ? '받아오는 중…' : `받아오는 중 ${Math.round(p * 100)}%`),
+      (loaded, total) =>
+        setLoading(
+          total
+            ? `받아오는 중 ${Math.round((loaded / total) * 100)}%`
+            : `받아오는 중 ${(loaded / 1048576).toFixed(1)}MB`,
+        ),
       abort.signal,
     )
     if (abort !== linkAbort) return
