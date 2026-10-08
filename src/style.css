@@ -590,6 +590,43 @@ button:disabled {
   transform: scaleX(-1);
 }
 
+.recorder-level {
+  display: none;
+}
+
+/* Audio-only recorder: no picture, just a live input level. */
+.recorder.audio {
+  background:
+    radial-gradient(60% 50% at 50% 45%, rgba(197, 248, 42, 0.1), transparent 70%),
+    var(--bg);
+}
+
+.recorder.audio .recorder-preview,
+.recorder.audio [data-act='flip'] {
+  visibility: hidden;
+}
+
+.recorder.audio .recorder-level {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  width: min(70vw, 420px);
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+}
+
+.recorder-level span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
 .recorder-status {
   position: absolute;
   top: calc(var(--safe-top) + 16px);

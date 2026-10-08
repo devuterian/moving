@@ -1,7 +1,8 @@
 /**
- * In-app camera recording. Resolves with the recorded clip, or null if closed.
- * `mirrored` is set for front-camera clips so playback can match the mirrored
- * preview the user saw while recording.
+ * In-app camera recording (or, with `audioOnly`, microphone recording).
+ * Resolves with the recorded clip, or null if closed. `mirrored` is set for
+ * front-camera clips so playback can match the mirrored preview the user saw
+ * while recording.
  */
 export type Recording = { file: File; mirrored: boolean }
 
@@ -13,19 +14,28 @@ const MIME_CANDIDATES = [
   'video/webm',
 ]
 
+const AUDIO_MIME_CANDIDATES = [
+  'audio/mp4;codecs=mp4a.40.2',
+  'audio/mp4',
+  'audio/webm;codecs=opus',
+  'audio/ogg;codecs=opus',
+  'audio/webm',
+]
+
 export const canRecord = () =>
   !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined'
 
-export function openRecorder(root: HTMLElement): Promise<Recording | null> {
+export function openRecorder(root: HTMLElement, { audioOnly = false } = {}): Promise<Recording | null> {
   return new Promise((resolve) => {
     const el = document.createElement('div')
-    el.className = 'recorder'
+    el.className = audioOnly ? 'recorder audio' : 'recorder'
     el.innerHTML = `
       <video class="recorder-preview" playsinline muted autoplay></video>
-      <div class="recorder-status" aria-live="polite">카메라 준비 중…</div>
+      <div class="recorder-level" aria-hidden="true"><span></span></div>
+      <div class="recorder-status" aria-live="polite">${audioOnly ? '마이크 준비 중…' : '카메라 준비 중…'}</div>
       <div class="recorder-bar">
         <button class="ghost" data-act="close" aria-label="닫기">닫기</button>
-        <button class="rec-btn" data-act="rec" aria-label="녹화" disabled><span></span></button>
+        <button class="rec-btn" data-act="rec" aria-label="${audioOnly ? '녹음' : '녹화'}" disabled><span></span></button>
         <button class="ghost" data-act="flip" aria-label="카메라 전환">전환</button>
       </div>`
     root.appendChild(el)
@@ -43,7 +53,39 @@ export function openRecorder(root: HTMLElement): Promise<Recording | null> {
     let closed = false
     let startSeq = 0
 
-    const stopStream = () => stream?.getTracks().forEach((t) => t.stop())
+    const stopStream = () => {
+      stream?.getTracks().forEach((t) => t.stop())
+      stopMeter()
+    }
+
+    // Audio only: a live input level, so it's clear the mic is hearing them.
+    let meterCtx: AudioContext | null = null
+    let meterFrame = 0
+    const stopMeter = () => {
+      if (!meterCtx) return
+      cancelAnimationFrame(meterFrame)
+      void meterCtx.close().catch(() => {})
+      meterCtx = null
+    }
+    const startMeter = (s: MediaStream) => {
+      const bar = el.querySelector<HTMLElement>('.recorder-level span')
+      if (!bar || typeof AudioContext === 'undefined') return
+      meterCtx = new AudioContext()
+      const analyser = meterCtx.createAnalyser()
+      analyser.fftSize = 1024
+      meterCtx.createMediaStreamSource(s).connect(analyser)
+      const buf = new Float32Array(analyser.fftSize)
+      let level = 0
+      const tick = () => {
+        analyser.getFloatTimeDomainData(buf)
+        let peak = 0
+        for (const v of buf) peak = Math.max(peak, Math.abs(v))
+        level = Math.max(peak, level * 0.92)
+        bar.style.transform = `scaleX(${Math.min(1, Math.sqrt(level))})`
+        meterFrame = requestAnimationFrame(tick)
+      }
+      tick()
+    }
 
     const close = (result: Recording | null) => {
       if (closed) return
@@ -72,6 +114,28 @@ export function openRecorder(root: HTMLElement): Promise<Recording | null> {
       const video = { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }
       let withMic = true
       let acquired: MediaStream
+      if (audioOnly) {
+        try {
+          // Raw input: voice processing would gate and colour the sound.
+          acquired = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          })
+        } catch (err) {
+          if (closed || seq !== startSeq) return
+          status.textContent = window.isSecureContext ? '마이크 권한이 필요해요' : '녹음은 HTTPS에서만 돼요'
+          console.warn(err)
+          return
+        }
+        if (closed || seq !== startSeq) {
+          acquired.getTracks().forEach((t) => t.stop())
+          return
+        }
+        stream = acquired
+        startMeter(stream)
+        status.textContent = '버튼을 눌러 녹음'
+        recBtn.disabled = false
+        return
+      }
       try {
         acquired = await navigator.mediaDevices.getUserMedia({ video, audio: true })
       } catch {
@@ -102,16 +166,19 @@ export function openRecorder(root: HTMLElement): Promise<Recording | null> {
 
     const record = () => {
       if (!stream) return
-      const mimeType = MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m))
+      const mimeType = (audioOnly ? AUDIO_MIME_CANDIDATES : MIME_CANDIDATES).find((m) =>
+        MediaRecorder.isTypeSupported(m),
+      )
       recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
       const chunks: Blob[] = []
       recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data)
       recorder.onstop = () => {
-        const type = recorder!.mimeType || mimeType || 'video/webm'
-        const ext = type.includes('mp4') ? 'mp4' : 'webm'
+        const type = recorder!.mimeType || mimeType || (audioOnly ? 'audio/webm' : 'video/webm')
+        const ext = type.includes('mp4') ? (audioOnly ? 'm4a' : 'mp4') : type.includes('ogg') ? 'ogg' : 'webm'
+        const label = audioOnly ? '녹음' : '녹화'
         close({
-          file: new File(chunks, `녹화-${new Date().toLocaleTimeString('ko-KR')}.${ext}`, { type }),
-          mirrored: facing === 'user',
+          file: new File(chunks, `${label}-${new Date().toLocaleTimeString('ko-KR')}.${ext}`, { type }),
+          mirrored: !audioOnly && facing === 'user',
         })
       }
       recorder.start(250)

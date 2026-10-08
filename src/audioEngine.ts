@@ -1,6 +1,7 @@
 import workletUrl from './scrub-worklet.ts?worker&url'
 import type { WorkletInMessage, WorkletOutMessage } from './scrub-worklet'
 import { streamAudio, type DecodedAudio } from './audioDecode'
+import { computePeaks } from './waveform'
 
 const isMobile = matchMedia('(pointer: coarse)').matches
 /** decodeAudioData needs the whole file in memory; past this, go silent instead. */
@@ -23,6 +24,8 @@ export class AudioEngine {
   rate = 0
   playing = false
   duration = 0
+  /** Waveform peaks of the loaded track, when load() was asked for them. */
+  peaks: Float32Array | null = null
   onEnded: Listener | null = null
 
   /** Must be called from inside a user gesture at least once (iOS). */
@@ -64,9 +67,15 @@ export class AudioEngine {
    * WebCodecs (low memory, timestamp-accurate); falls back to decodeAudioData
    * for small files, and to silence (so the worklet still works as a clock)
    * when there is no decodable audio. Pads with silence up to the video's
-   * length. Resolves null if a newer load() started meanwhile.
+   * length. Resolves null if a newer load() started meanwhile. With
+   * `withPeaks`, also computes waveform peaks (before the PCM moves to the
+   * audio thread).
    */
-  async load(file: Blob, videoDuration: number): Promise<{ hasAudio: boolean; duration: number } | null> {
+  async load(
+    file: Blob,
+    videoDuration: number,
+    { withPeaks = false } = {},
+  ): Promise<{ hasAudio: boolean; duration: number } | null> {
     const seq = ++this.loadSeq
     await this.unlock()
     const ctx = this.ctx!
@@ -90,6 +99,7 @@ export class AudioEngine {
       sampleRate: ctx.sampleRate,
     }
     const { channels, sampleRate } = audio
+    this.peaks = withPeaks && hasAudio ? computePeaks(channels) : null
     this.duration = channels[0].length / sampleRate
     this.time = 0
     this.rate = 0

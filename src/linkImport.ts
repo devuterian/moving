@@ -194,7 +194,8 @@ async function download(src: Source, onProgress: (loaded: number, total: number)
     onProgress(got, total)
   }
   if (got < MIN_VIDEO_BYTES) throw new Error('empty download')
-  const type = res.headers.get('content-type')?.startsWith('video/') ? res.headers.get('content-type')! : 'video/mp4'
+  const contentType = res.headers.get('content-type')?.split(';')[0] ?? ''
+  const type = /^(video|audio)\//.test(contentType) ? contentType : 'video/mp4'
   const name = src.name.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 120)
   return new File(parts, /\.\w{2,4}$/.test(name) ? name : `${name}.mp4`, { type })
 }

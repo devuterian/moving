@@ -4,6 +4,7 @@ import { FrameCache } from './frameCache'
 import { clearLastVideo, loadLastVideo, saveLastVideo } from './lastVideo'
 import { canRecord, openRecorder } from './recorder'
 import { fetchLinkVideo, parseLink } from './linkImport'
+import { Waveform } from './waveform'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -62,57 +63,87 @@ freezeToggle.addEventListener('change', () =>
 const NEXT = /\/next\/?$/.test(location.pathname)
 document.documentElement.classList.toggle('next', NEXT)
 
-if (!canRecord()) document.querySelectorAll('[data-act="record"]').forEach((b) => b.remove())
+if (!canRecord()) document.querySelectorAll('[data-act^="record"]').forEach((b) => b.remove())
 
 // ---------------------------------------------------------------------------
 // Loading
 
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm|mkv|3gp)$/i
+const AUDIO_EXT = /\.(mp3|wav|ogg|oga|opus|m4a|aac|flac|aif|aiff|weba|caf)$/i
+
+/** Audio files show a waveform instead of a picture. */
+let waveform: Waveform | null = null
+let waveKey = ''
+
 async function loadFile(file: File, { restored = false, mirrored = false } = {}) {
-  if (!file.type.startsWith('video/') && !/\.(mp4|mov|m4v|webm|mkv|3gp)$/i.test(file.name)) {
-    toast('영상 파일만 돼요')
+  const typedAudio = file.type.startsWith('audio/') || (!file.type.startsWith('video/') && AUDIO_EXT.test(file.name))
+  if (!typedAudio && !file.type.startsWith('video/') && !VIDEO_EXT.test(file.name)) {
+    toast('영상이나 소리 파일만 돼요')
     return
   }
   const token = ++loadToken
   engine.unlock()
   engine.pause()
-  setLoading(restored ? '지난 영상 불러오는 중…' : '영상 여는 중…')
+  setLoading(restored ? '지난 파일 불러오는 중…' : typedAudio ? '소리 여는 중…' : '영상 여는 중…')
 
   cache?.dispose()
   cache = null
+  waveform = null
   if (objectUrl) URL.revokeObjectURL(objectUrl)
   objectUrl = URL.createObjectURL(file)
   loaded = false
 
-  try {
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve()
-      video.onerror = () => reject(new Error('unsupported'))
-      video.src = objectUrl!
-    })
-  } catch {
+  let audioOnly = typedAudio
+  if (!audioOnly) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve()
+        video.onerror = () => reject(new Error('unsupported'))
+        video.src = objectUrl!
+      })
+    } catch {
+      if (token !== loadToken) return
+      setLoading(null)
+      showEmpty()
+      if (restored) void clearLastVideo()
+      else toast('이 영상은 브라우저가 못 읽어요 😢')
+      return
+    }
     if (token !== loadToken) return
-    setLoading(null)
-    showEmpty()
-    if (restored) void clearLastVideo()
-    else toast('이 영상은 브라우저가 못 읽어요 😢')
-    return
+    // A "video" with no picture (e.g. an .m4a typed video/mp4) is audio.
+    audioOnly = !video.videoWidth
   }
-  if (token !== loadToken) return
+  if (audioOnly) {
+    video.removeAttribute('src')
+    video.load()
+  }
 
   setLoading('소리 뽑는 중…')
-  const audio = await engine.load(file, video.duration)
+  const audio = await engine.load(file, audioOnly ? 0 : video.duration, { withPeaks: audioOnly })
   if (!audio || token !== loadToken) return
   const { hasAudio, duration } = audio
-
-  // iOS doesn't paint a paused video until it has played once.
-  video.play().then(() => video.pause()).catch(() => {})
+  if (audioOnly) {
+    if (!hasAudio || !engine.peaks) {
+      setLoading(null)
+      showEmpty()
+      if (restored) void clearLastVideo()
+      else toast('이 소리 파일은 브라우저가 못 읽어요 😢')
+      return
+    }
+    waveform = new Waveform(engine.peaks)
+    waveKey = ''
+  } else {
+    // iOS doesn't paint a paused video until it has played once.
+    video.play().then(() => video.pause()).catch(() => {})
+  }
 
   engine.seek(0)
   loaded = true
   setLoading(null)
   app.classList.add('loaded')
+  app.classList.toggle('audio', audioOnly)
   $('filename').textContent = file.name
-  app.classList.toggle('mirrored', mirrored)
+  app.classList.toggle('mirrored', mirrored && !audioOnly)
   $('empty').hidden = true
   $('top').hidden = false
   $('bottom').hidden = false
@@ -121,6 +152,11 @@ async function loadFile(file: File, { restored = false, mirrored = false } = {})
   if (!restored) void saveLastVideo(file, mirrored)
   void keepAwake()
 
+  if (audioOnly) {
+    $('cached').style.transform = 'scaleX(1)'
+    $('prep').hidden = true
+    return
+  }
   cache = new FrameCache(file, objectUrl, duration, video.videoWidth, video.videoHeight)
   const c = cache
   const showProgress = (p: number) => {
@@ -163,7 +199,8 @@ document.addEventListener('visibilitychange', () => void keepAwake())
 
 /** Back to the start screen (e.g. after a file failed to open). */
 function showEmpty() {
-  app.classList.remove('loaded')
+  app.classList.remove('loaded', 'audio')
+  waveform = null
   video.removeAttribute('src')
   video.load()
   setCanvasVisible(false)
@@ -203,10 +240,12 @@ app.addEventListener('click', (e) => {
   } else if (act === 'open') {
     engine.unlock()
     fileInput.click()
-  } else if (act === 'record') {
+  } else if (act === 'record' || act === 'record-audio') {
     engine.unlock()
     engine.pause()
-    void openRecorder(app).then((rec) => rec && loadFile(rec.file, { mirrored: rec.mirrored }))
+    void openRecorder(app, { audioOnly: act === 'record-audio' }).then(
+      (rec) => rec && loadFile(rec.file, { mirrored: rec.mirrored }),
+    )
   } else if (act === 'play') {
     togglePlay()
   } else if (act === 'settings') {
@@ -657,13 +696,22 @@ const fmt = (t: number) => {
   return `${m}:${s.toFixed(1).padStart(4, '0')}`
 }
 
-function render() {
-  requestAnimationFrame(render)
-  if (!loaded) return
+/** Audio files: the whole track as a waveform, lime up to the playhead. */
+function drawWaveform(w: Waveform, t: number) {
+  setCanvasVisible(true)
+  const progress = engine.duration ? t / engine.duration : 0
+  const key = `${canvas.width}x${canvas.height}:${progress}`
+  if (key === waveKey) return
+  waveKey = key
+  // Fill the band between the top bar and the bottom controls.
+  const scale = canvas.width / (stage.clientWidth || 1)
+  const stageTop = stage.getBoundingClientRect().top
+  const top = ($('top').getBoundingClientRect().bottom - stageTop + 8) * scale
+  const bottom = ($('bottom').getBoundingClientRect().top - stageTop - 8) * scale
+  w.draw(ctx2d, progress, Math.max(0, top), bottom > top ? bottom : canvas.height)
+}
 
-  const t = scrubbing ? target : engine.time
-  const moving = scrubbing || Math.abs(engine.rate) > 0.02
-
+function renderVideo(t: number, moving: boolean) {
   if (engine.playing) {
     // Normal forward playback: let the real <video> play, nudged to the audio clock.
     if (video.paused && !(t >= video.duration - 0.05)) {
@@ -701,6 +749,17 @@ function render() {
       if (symmetric && !video.seeking) showVideo()
     }
   }
+}
+
+function render() {
+  requestAnimationFrame(render)
+  if (!loaded) return
+
+  const t = scrubbing ? target : engine.time
+  const moving = scrubbing || Math.abs(engine.rate) > 0.02
+
+  if (waveform) drawWaveform(waveform, t)
+  else renderVideo(t, moving)
 
   // HUD
   const d = engine.duration || 1
