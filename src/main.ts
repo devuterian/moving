@@ -3,6 +3,7 @@ import { AudioEngine } from './audioEngine'
 import { FrameCache } from './frameCache'
 import { clearLastVideo, loadLastVideo, saveLastVideo } from './lastVideo'
 import { canRecord, openRecorder } from './recorder'
+import { fetchLinkVideo, parseLink } from './linkImport'
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -56,6 +57,10 @@ freezeToggle.checked = localStorage.getItem(FREEZE_KEY) !== '0'
 freezeToggle.addEventListener('change', () =>
   localStorage.setItem(FREEZE_KEY, freezeToggle.checked ? '1' : '0'),
 )
+
+/** /next: experimental features (opening X / YouTube links). */
+const NEXT = /\/next\/?$/.test(location.pathname)
+document.documentElement.classList.toggle('next', NEXT)
 
 if (!canRecord()) document.querySelectorAll('[data-act="record"]').forEach((b) => b.remove())
 
@@ -134,7 +139,7 @@ async function loadFile(file: File, { restored = false, mirrored = false } = {})
 
 // Offline support / installable app (production builds only).
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  void navigator.serviceWorker.register('./sw.js').catch(() => {})
+  void navigator.serviceWorker.register(NEXT ? '../sw.js' : './sw.js').catch(() => {})
 }
 
 // Reopen whatever was loaded last time. Audio still unlocks on the first touch.
@@ -206,6 +211,73 @@ app.addEventListener('click', (e) => {
     togglePlay()
   } else if (act === 'settings') {
     setSettingsOpen(true)
+  } else if (act === 'link') {
+    setLinkOpen(true)
+  } else if (act === 'link-close') {
+    setLinkOpen(false)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Opening X / YouTube links (/next only)
+
+const linkInput = $<HTMLInputElement>('link-input')
+let linkAbort: AbortController | null = null
+
+function setLinkOpen(open: boolean) {
+  $('linkbox').hidden = !open
+  if (open) {
+    linkInput.value = ''
+    linkInput.focus()
+  }
+}
+
+async function openLink(text: string) {
+  const link = parseLink(text)
+  if (!link) {
+    toast('X나 유튜브 영상 링크만 돼요')
+    return
+  }
+  setLinkOpen(false)
+  engine.unlock()
+  linkAbort?.abort()
+  const abort = (linkAbort = new AbortController())
+  setLoading('영상 찾는 중…')
+  try {
+    const file = await fetchLinkVideo(
+      link,
+      (p) => setLoading(p < 0 ? '받아오는 중…' : `받아오는 중 ${Math.round(p * 100)}%`),
+      abort.signal,
+    )
+    if (abort !== linkAbort) return
+    linkAbort = null
+    await loadFile(file)
+  } catch (err) {
+    if (abort !== linkAbort) return
+    linkAbort = null
+    console.warn('[link]', err)
+    setLoading(null)
+    toast(link.kind === 'youtube' ? '유튜브에서 못 받아왔어요 😢 잠시 뒤 다시 해보세요' : '영상을 못 받아왔어요 😢')
+  }
+}
+
+$('link-form').addEventListener('submit', (e) => {
+  e.preventDefault()
+  void openLink(linkInput.value)
+})
+$('linkbox').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) setLinkOpen(false)
+})
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && !$('linkbox').hidden) setLinkOpen(false)
+})
+// Pasting a link anywhere (outside a text field) opens it straight away.
+window.addEventListener('paste', (e) => {
+  if (!NEXT || e.target instanceof HTMLInputElement) return
+  const text = e.clipboardData?.getData('text') ?? ''
+  if (parseLink(text)) {
+    e.preventDefault()
+    void openLink(text)
   }
 })
 

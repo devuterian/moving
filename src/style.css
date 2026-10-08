@@ -650,3 +650,67 @@ button:disabled {
   height: 26px;
   border-radius: 6px;
 }
+
+/* Link import (/next only) ------------------------------------------------ */
+
+html:not(.next) .next-only {
+  display: none !important;
+}
+
+.linkbox {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 8;
+}
+
+.linkbox[hidden] {
+  display: none;
+}
+
+.linkbox-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(24, 24, 32, 0.96);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.linkbox-card input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+}
+
+.linkbox-card input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.linkbox-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.linkbox-actions button {
+  min-width: 0;
+  flex: 1;
+}
+
+.linkbox .fineprint {
+  margin: 0;
+  color: var(--muted);
+}
