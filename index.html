@@ -2,6 +2,8 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://static.cloudflareinsights.com/beacon.min.js; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; media-src 'self' blob:; worker-src 'self'; connect-src 'self' https://cloudflareinsights.com/cdn-cgi/rum; manifest-src 'self'; base-uri 'none'; object-src 'none'; frame-src 'none'; form-action 'none'" />
+    <meta name="referrer" content="strict-origin" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#0b0b0f" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -119,6 +121,6 @@
     </main>
     <script type="module" src="/src/main.ts"></script>
     <!-- Cloudflare Web Analytics: cookie-less page views and referrers. Videos never leave the device. -->
-    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "7f22d5d3a9c84804af7a1089d46b61b5"}'></script>
+    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" integrity="sha384-IJ+SAOzs9MgkuZ7AgklnzuCuJygVaKTjPTYXJMvM7piBSj4Q16DQGOWfe2kahIq+" crossorigin="anonymous" data-cf-beacon='{"token": "7f22d5d3a9c84804af7a1089d46b61b5"}'></script>
   </body>
 </html>

@@ -40,42 +40,64 @@ export function openRecorder(root: HTMLElement): Promise<Recording | null> {
     let facing: 'user' | 'environment' = 'user'
     let startedAt = 0
     let timer = 0
+    let closed = false
+    let startSeq = 0
 
     const stopStream = () => stream?.getTracks().forEach((t) => t.stop())
 
     const close = (result: Recording | null) => {
+      if (closed) return
+      closed = true
+      startSeq++
+      window.removeEventListener('pagehide', onPageHide)
       clearInterval(timer)
       if (recorder?.state === 'recording') {
         recorder.onstop = null
         recorder.stop()
       }
       stopStream()
+      preview.srcObject = null
       el.remove()
       resolve(result)
     }
 
+    const onPageHide = () => close(null)
+    window.addEventListener('pagehide', onPageHide)
+
     const start = async () => {
+      const seq = ++startSeq
       stopStream()
       recBtn.disabled = true
+      flipBtn.disabled = true
       const video = { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }
       let withMic = true
+      let acquired: MediaStream
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video, audio: true })
+        acquired = await navigator.mediaDevices.getUserMedia({ video, audio: true })
       } catch {
+        if (closed || seq !== startSeq) return
         // No mic (or mic permission denied): still let them record picture only.
         withMic = false
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video })
+          acquired = await navigator.mediaDevices.getUserMedia({ video })
         } catch (err) {
+          if (closed || seq !== startSeq) return
           status.textContent = window.isSecureContext ? '카메라 권한이 필요해요' : '녹화는 HTTPS에서만 돼요'
           console.warn(err)
+          flipBtn.disabled = false
           return
         }
       }
+      if (closed || seq !== startSeq) {
+        acquired.getTracks().forEach((t) => t.stop())
+        return
+      }
+      stream = acquired
       preview.srcObject = stream
       preview.classList.toggle('mirrored', facing === 'user')
       status.textContent = withMic ? '버튼을 눌러 녹화' : '마이크 없이 녹화돼요'
       recBtn.disabled = false
+      flipBtn.disabled = false
     }
 
     const record = () => {
