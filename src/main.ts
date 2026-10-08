@@ -378,20 +378,31 @@ function updateSymmetric() {
   needsSettle = true
 }
 
-stage.addEventListener('pointerdown', (e) => {
-  if (!loaded) return
-  if (activePointer !== null) {
-    // Another finger while one is already scrubbing: mirror mode for as
-    // long as it stays down. The first finger keeps the drag.
-    if (e.pointerType !== 'mouse') {
-      multiTouch = true
-      const r = stage.getBoundingClientRect()
-      mirrorPointers.set(e.pointerId, e.clientX < r.left + r.width / 2 ? 'left' : 'right')
-      stage.setPointerCapture(e.pointerId)
-      updateSymmetric()
-    }
-    return
+/**
+ * Another finger while one is already scrubbing (on the stage or the
+ * timeline): mirror mode for as long as it stays down. The first finger keeps
+ * the drag. The top half of the screen keeps the left side, the bottom half
+ * the right. Returns true if the pointer was taken (or ignored) this way.
+ */
+function mirrorFinger(e: PointerEvent, el: HTMLElement) {
+  if (activePointer === null && timelinePointer === null) return false
+  if (e.pointerType !== 'mouse') {
+    multiTouch = true
+    const r = stage.getBoundingClientRect()
+    mirrorPointers.set(e.pointerId, e.clientY < r.top + r.height / 2 ? 'left' : 'right')
+    el.setPointerCapture(e.pointerId)
+    updateSymmetric()
   }
+  return true
+}
+const releaseMirrorFinger = (e: PointerEvent) => {
+  if (mirrorPointers.delete(e.pointerId)) updateSymmetric()
+}
+window.addEventListener('pointerup', releaseMirrorFinger)
+window.addEventListener('pointercancel', releaseMirrorFinger)
+
+stage.addEventListener('pointerdown', (e) => {
+  if (!loaded || mirrorFinger(e, stage)) return
   if (e.button > 0) return
   multiTouch = false
   activePointer = e.pointerId
@@ -410,7 +421,6 @@ stage.addEventListener(moveEvent as 'pointermove', (e: PointerEvent) => {
 })
 
 const onPointerEnd = (e: PointerEvent) => {
-  if (mirrorPointers.delete(e.pointerId)) updateSymmetric()
   if (e.pointerId !== activePointer) return
   activePointer = null
   const isTap =
@@ -444,7 +454,7 @@ const timelineTo = (e: PointerEvent) => {
   engine.scrubTo(target)
 }
 timeline.addEventListener('pointerdown', (e) => {
-  if (!loaded) return
+  if (!loaded || mirrorFinger(e, timeline)) return
   timelinePointer = e.pointerId
   timeline.setPointerCapture(e.pointerId)
   wasPlaying = engine.playing
