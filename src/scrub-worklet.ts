@@ -38,6 +38,18 @@ export type WorkletOutMessage =
   | { type: 'ended' }
 
 const GAIN_SMOOTH_SECONDS = 0.006
+// Tape mode: pitch is speed, so speed must be smooth. Pointer events arrive
+// every 4–16 ms, and chasing each one makes the speed (and pitch) jump at
+// that rate: a boiling, bubbling sound. Instead the finger's velocity is
+// estimated across events (slope over the last ~35 ms, which also averages
+// out the audio-block timestamp quantisation), and position error is only
+// corrected gently.
+const VELOCITY_WINDOW_SECONDS = 0.035
+const VELOCITY_TAU_SECONDS = 0.01
+const EVENT_HISTORY = 32
+/** No pointer event for this long means the finger has stopped. */
+const FINGER_IDLE_SECONDS = 0.035
+const TAPE_MIN_CORRECT_MS = 30
 const REPORT_EVERY_BLOCKS = 2
 const MAX_GRAINS = 4
 
@@ -57,6 +69,17 @@ class ScrubProcessor extends AudioWorkletProcessor {
   private hold = false
   private lastDir: -1 | 1 = 1
   private blockCount = 0
+  /** Output samples processed so far: the clock for velocity estimates. */
+  private clock = 0
+  /** Tape mode: finger velocity in source samples per output sample. */
+  private fingerVel = 0
+  private lastTargetClock = -1
+  // Recent (clock, target) pairs, a ring buffer.
+  private readonly evClock = new Float64Array(EVENT_HISTORY)
+  private readonly evTarget = new Float64Array(EVENT_HISTORY)
+  private evCount = 0
+  private evHead = 0
+  private tapeCorrectAlpha = 0
 
   private grainLen = 0
   private hop = 0
@@ -100,6 +123,7 @@ class ScrubProcessor extends AudioWorkletProcessor {
       this.sinceSpawn = 0
     }
     this.followAlpha = alphaFor(p.followMs)
+    this.tapeCorrectAlpha = alphaFor(Math.max(p.followMs, TAPE_MIN_CORRECT_MS))
     this.rateAlpha = alphaFor(p.smoothMs)
     this.silentRate = Math.max(0.001, p.silentRate)
     this.jitterSeconds = Math.max(0, p.jitterMs) / 1000
@@ -121,10 +145,40 @@ class ScrubProcessor extends AudioWorkletProcessor {
         this.playing = false
         this.grainAge.fill(-1)
         break
-      case 'target':
+      case 'target': {
+        const target = this.clampPos(msg.t * this.srcRate)
+        const dt = this.clock - this.lastTargetClock
+        if (this.playing || this.lastTargetClock < 0 || dt > FINGER_IDLE_SECONDS * 4 * sampleRate) {
+          // A fresh gesture: start from rest.
+          this.fingerVel = 0
+          this.evCount = 0
+        }
+        // Several events can land in one audio block (same clock): keep the latest.
+        if (this.evCount && this.evClock[this.evHead] === this.clock) this.evTarget[this.evHead] = target
+        else {
+          this.evHead = (this.evHead + 1) % EVENT_HISTORY
+          this.evClock[this.evHead] = this.clock
+          this.evTarget[this.evHead] = target
+          this.evCount = Math.min(this.evCount + 1, EVENT_HISTORY)
+        }
+        // Slope from the oldest event inside the window to this one.
+        let oldest = this.evHead
+        for (let k = 1; k < this.evCount; k++) {
+          const j = (this.evHead - k + EVENT_HISTORY) % EVENT_HISTORY
+          if (this.clock - this.evClock[j] > VELOCITY_WINDOW_SECONDS * sampleRate) break
+          oldest = j
+        }
+        const span = this.clock - this.evClock[oldest]
+        if (span > 0) {
+          const v = (target - this.evTarget[oldest]) / span
+          const step = dt > 0 ? dt : 128
+          this.fingerVel += (v - this.fingerVel) * (1 - Math.exp(-step / (VELOCITY_TAU_SECONDS * sampleRate)))
+        }
+        this.lastTargetClock = this.clock
         this.playing = false
-        this.target = this.clampPos(msg.t * this.srcRate)
+        this.target = target
         break
+      }
       case 'seek':
         this.pos = this.target = this.clampPos(msg.t * this.srcRate)
         this.rate = 0
@@ -161,7 +215,17 @@ class ScrubProcessor extends AudioWorkletProcessor {
 
     for (let i = 0; i < frames; i++) {
       // Speed in real-time units (1 = normal playback, negative = backwards).
-      const desired = this.playing ? 1 : ((this.target - this.pos) * this.followAlpha) / this.step
+      let desired: number
+      if (this.playing) desired = 1
+      else if (this.tape) {
+        // Finger stopped (no events lately): let the velocity estimate die out.
+        if (this.clock - this.lastTargetClock > FINGER_IDLE_SECONDS * sampleRate) this.fingerVel *= 0.999
+        // Correct toward where the finger is now (last event + velocity since),
+        // not toward the staircase of raw events.
+        const since = Math.min(this.clock + i - this.lastTargetClock, FINGER_IDLE_SECONDS * sampleRate)
+        const aim = this.clampPos(this.target + this.fingerVel * since)
+        desired = (this.fingerVel + (aim - this.pos) * this.tapeCorrectAlpha) / this.step
+      } else desired = ((this.target - this.pos) * this.followAlpha) / this.step
       this.rate += (desired - this.rate) * this.rateAlpha
 
       let pos = this.pos + this.rate * this.step
@@ -233,6 +297,7 @@ class ScrubProcessor extends AudioWorkletProcessor {
       }
     }
 
+    this.clock += frames
     if (++this.blockCount >= REPORT_EVERY_BLOCKS) {
       this.blockCount = 0
       this.port.postMessage({
