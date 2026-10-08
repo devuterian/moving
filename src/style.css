@@ -494,6 +494,16 @@ button:disabled {
   font-weight: 600;
 }
 
+.setting + .setting {
+  margin-top: 16px;
+}
+
+.setting .toggle {
+  justify-content: space-between;
+  font-size: 14px;
+  color: inherit;
+}
+
 .setting-slider {
   display: flex;
   align-items: center;
@@ -665,8 +675,11 @@ button:disabled {
 }
 
 .rec-btn {
+  box-sizing: border-box;
   width: 72px;
   height: 72px;
+  /* No UA padding: it squeezed the content box and pushed the dot off-centre. */
+  padding: 0;
   border-radius: 50%;
   background: transparent;
   border: 4px solid #fff;

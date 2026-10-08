@@ -9,6 +9,46 @@ const MAX_WHOLE_DECODE_BYTES = (isMobile ? 300 : 1024) * 1024 * 1024
 
 type Listener = () => void
 
+/** Normalisation target: a gated RMS of about -16 dBFS (roughly -16 LUFS). */
+const TARGET_RMS = 10 ** (-16 / 20)
+/** Never boost more than this (+20 dB), so near-silence doesn't turn into hiss. */
+const MAX_BOOST = 10
+/** Peaks stay just under full scale after the gain. */
+const PEAK_CEILING = 0.98
+
+/**
+ * Gain that brings the track to TARGET_RMS. Loudness is the mean power of
+ * 400 ms blocks louder than -50 dBFS, so long silences don't count.
+ */
+function normalizeGain(channels: Float32Array[], sampleRate: number) {
+  const block = Math.max(1, Math.round(sampleRate * 0.4))
+  const length = channels[0]?.length ?? 0
+  const gate = 10 ** (-50 / 10)
+  let peak = 0
+  let power = 0
+  let blocks = 0
+  for (let start = 0; start < length; start += block) {
+    const end = Math.min(length, start + block)
+    let sum = 0
+    for (const ch of channels) {
+      for (let i = start; i < end; i++) {
+        const v = ch[i]
+        sum += v * v
+        if (v > peak) peak = v
+        else if (-v > peak) peak = -v
+      }
+    }
+    const mean = sum / ((end - start) * channels.length)
+    if (mean > gate) {
+      power += mean
+      blocks++
+    }
+  }
+  if (!blocks || !peak) return 1
+  const rms = Math.sqrt(power / blocks)
+  return Math.min(TARGET_RMS / rms, MAX_BOOST, PEAK_CEILING / peak)
+}
+
 /**
  * Owns the AudioContext and the scrub worklet. The worklet's playhead is the
  * master clock: video frames are drawn from whatever time it reports.
@@ -16,6 +56,10 @@ type Listener = () => void
 export class AudioEngine {
   private ctx: AudioContext | null = null
   private node: AudioWorkletNode | null = null
+  private output: GainNode | null = null
+  /** Gain that would normalise the loaded track; applied while `normalize` is on. */
+  private trackGain = 1
+  private normalizeOn = true
   private ready: Promise<void> | null = null
   private loadSeq = 0
 
@@ -59,7 +103,8 @@ export class AudioEngine {
         this.onEnded?.()
       }
     }
-    this.node.connect(ctx.destination)
+    this.output = new GainNode(ctx, { gain: this.normalizeOn ? this.trackGain : 1 })
+    this.node.connect(this.output).connect(ctx.destination)
   }
 
   /**
@@ -100,6 +145,8 @@ export class AudioEngine {
     }
     const { channels, sampleRate } = audio
     this.peaks = withPeaks && hasAudio ? computePeaks(channels) : null
+    this.trackGain = hasAudio ? normalizeGain(channels, sampleRate) : 1
+    this.applyGain()
     this.duration = channels[0].length / sampleRate
     this.time = 0
     this.rate = 0
@@ -138,6 +185,18 @@ export class AudioEngine {
   seek(t: number) {
     this.time = this.clamp(t)
     this.post({ type: 'seek', t: this.time })
+  }
+
+  /** Loudness normalisation on or off (smoothly, so it never clicks). */
+  setNormalize(on: boolean) {
+    this.normalizeOn = on
+    this.applyGain()
+  }
+
+  private applyGain() {
+    if (!this.output || !this.ctx) return
+    const gain = this.normalizeOn ? this.trackGain : 1
+    this.output.gain.setTargetAtTime(gain, this.ctx.currentTime, 0.03)
   }
 
   /** Freeze: while on, a still playhead keeps sounding (stretched). */

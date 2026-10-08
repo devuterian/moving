@@ -53,6 +53,16 @@ autoplayToggle.addEventListener('change', () =>
   localStorage.setItem(AUTOPLAY_KEY, autoplayToggle.checked ? '1' : '0'),
 )
 
+// Loudness normalisation, on unless turned off.
+const NORMALIZE_KEY = 'scrubber:normalize'
+const normalizeToggle = $<HTMLInputElement>('normalize')
+normalizeToggle.checked = localStorage.getItem(NORMALIZE_KEY) !== '0'
+engine.setNormalize(normalizeToggle.checked)
+normalizeToggle.addEventListener('change', () => {
+  localStorage.setItem(NORMALIZE_KEY, normalizeToggle.checked ? '1' : '0')
+  engine.setNormalize(normalizeToggle.checked)
+})
+
 const FREEZE_KEY = 'scrubber:freeze'
 freezeToggle.checked = localStorage.getItem(FREEZE_KEY) !== '0'
 freezeToggle.addEventListener('change', () =>
