@@ -19,7 +19,7 @@ const freezeToggle = $<HTMLInputElement>('freeze')
 /** Sensitivity: seconds of media per screen width of drag (log slider). */
 const MIN_SECONDS_PER_SCREEN = 0.5
 const MAX_SECONDS_PER_SCREEN = 30
-const DEFAULT_SECONDS_PER_SCREEN = matchMedia('(pointer: fine)').matches ? 20 : 3
+const DEFAULT_SECONDS_PER_SCREEN = MIN_SECONDS_PER_SCREEN * (MAX_SECONDS_PER_SCREEN / MIN_SECONDS_PER_SCREEN) ** 0.85
 const TAP_MAX_PX = 8
 const TAP_MAX_MS = 250
 
@@ -46,7 +46,7 @@ autoplayToggle.addEventListener('change', () =>
 )
 
 const FREEZE_KEY = 'scrubber:freeze'
-freezeToggle.checked = localStorage.getItem(FREEZE_KEY) === '1'
+freezeToggle.checked = localStorage.getItem(FREEZE_KEY) !== '0'
 freezeToggle.addEventListener('change', () =>
   localStorage.setItem(FREEZE_KEY, freezeToggle.checked ? '1' : '0'),
 )
