@@ -358,8 +358,14 @@ let wasPlaying = false
 /** A second finger joined this drag (so its own tap doesn't toggle playback). */
 let multiTouch = false
 
-function toggleSymmetric() {
-  symmetric = !symmetric
+/** Extra fingers held down on the stage; mirror mode lasts while any is. */
+const mirrorPointers = new Set<number>()
+let shiftHeld = false
+
+function updateSymmetric() {
+  const on = mirrorPointers.size > 0 || shiftHeld
+  if (on === symmetric) return
+  symmetric = on
   // Redraw (or drop the canvas) right away, even while paused at rest.
   needsSettle = true
 }
@@ -367,11 +373,13 @@ function toggleSymmetric() {
 stage.addEventListener('pointerdown', (e) => {
   if (!loaded) return
   if (activePointer !== null) {
-    // Another finger while one is already scrubbing: flip mirror mode. The
-    // first finger keeps the drag; this one is otherwise ignored.
+    // Another finger while one is already scrubbing: mirror mode for as
+    // long as it stays down. The first finger keeps the drag.
     if (e.pointerType !== 'mouse') {
       multiTouch = true
-      toggleSymmetric()
+      mirrorPointers.add(e.pointerId)
+      stage.setPointerCapture(e.pointerId)
+      updateSymmetric()
     }
     return
   }
@@ -393,6 +401,7 @@ stage.addEventListener(moveEvent as 'pointermove', (e: PointerEvent) => {
 })
 
 const onPointerEnd = (e: PointerEvent) => {
+  if (mirrorPointers.delete(e.pointerId)) updateSymmetric()
   if (e.pointerId !== activePointer) return
   activePointer = null
   const isTap =
@@ -444,18 +453,18 @@ const endTimeline = (e: PointerEvent) => {
 timeline.addEventListener('pointerup', endTimeline)
 timeline.addEventListener('pointercancel', endTimeline)
 
-// Shift on its own flips mirror mode. It fires on release, so Shift+Arrow
-// (fine stepping) doesn't also flip it.
-let shiftAlone = false
+// Holding Shift shows mirror mode until it's released.
+const setShift = (held: boolean) => {
+  shiftHeld = held && loaded
+  updateSymmetric()
+}
 window.addEventListener('keydown', (e) => {
-  shiftAlone = e.key === 'Shift' && (shiftAlone || !e.repeat)
+  if (e.key === 'Shift' && !(e.target instanceof HTMLInputElement)) setShift(true)
 })
 window.addEventListener('keyup', (e) => {
-  if (e.key !== 'Shift' || !shiftAlone) return
-  shiftAlone = false
-  if (loaded && !(e.target instanceof HTMLInputElement)) toggleSymmetric()
+  if (e.key === 'Shift') setShift(false)
 })
-window.addEventListener('pointerdown', () => (shiftAlone = false), { capture: true })
+window.addEventListener('blur', () => setShift(false))
 
 window.addEventListener('keydown', (e) => {
   if (!loaded || e.target instanceof HTMLInputElement) return
