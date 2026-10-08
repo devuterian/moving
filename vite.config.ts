@@ -8,6 +8,8 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
  * /next gets them; the main page keeps its strict policy.
  */
 const NEXT_CONNECT = [
+  'https://rue-cobalt.xenon.zone',
+  'https://cobaltapi.cjs.nz',
   'https://api.fxtwitter.com',
   'https://api.vxtwitter.com',
   'https://video.twimg.com',

@@ -235,7 +235,7 @@ function setLinkOpen(open: boolean) {
 async function openLink(text: string) {
   const link = parseLink(text)
   if (!link) {
-    toast('X나 유튜브 영상 링크만 돼요')
+    toast('링크 주소를 못 읽었어요')
     return
   }
   setLinkOpen(false)
@@ -262,7 +262,7 @@ async function openLink(text: string) {
     linkAbort = null
     console.warn('[link]', err)
     setLoading(null)
-    toast(link.kind === 'youtube' ? '유튜브에서 못 받아왔어요 😢 잠시 뒤 다시 해보세요' : '영상을 못 받아왔어요 😢')
+    toast('영상을 못 받아왔어요 😢 잠시 뒤 다시 해보세요')
   }
 }
 
