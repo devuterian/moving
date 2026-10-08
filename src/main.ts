@@ -35,6 +35,8 @@ let target = 0
 let scrubbing = false
 let showingCanvas = false
 let needsSettle = false
+/** Mirror mode: the left half is reflected onto the right, about the center. */
+let symmetric = false
 
 const SENSITIVITY_KEY = 'scrubber:sensitivity:v2'
 let secondsPerScreen = Number(localStorage.getItem(SENSITIVITY_KEY)) || DEFAULT_SECONDS_PER_SCREEN
@@ -353,9 +355,28 @@ let lastX = 0
 let downX = 0
 let downAt = 0
 let wasPlaying = false
+/** A second finger joined this drag (so its own tap doesn't toggle playback). */
+let multiTouch = false
+
+function toggleSymmetric() {
+  symmetric = !symmetric
+  // Redraw (or drop the canvas) right away, even while paused at rest.
+  needsSettle = true
+}
 
 stage.addEventListener('pointerdown', (e) => {
-  if (!loaded || activePointer !== null || e.button > 0) return
+  if (!loaded) return
+  if (activePointer !== null) {
+    // Another finger while one is already scrubbing: flip mirror mode. The
+    // first finger keeps the drag; this one is otherwise ignored.
+    if (e.pointerType !== 'mouse') {
+      multiTouch = true
+      toggleSymmetric()
+    }
+    return
+  }
+  if (e.button > 0) return
+  multiTouch = false
   activePointer = e.pointerId
   stage.setPointerCapture(e.pointerId)
   wasPlaying = engine.playing
@@ -376,7 +397,7 @@ const onPointerEnd = (e: PointerEvent) => {
   activePointer = null
   const isTap =
     Math.abs(e.clientX - downX) < TAP_MAX_PX && performance.now() - downAt < TAP_MAX_MS
-  if (isTap) endScrub(!wasPlaying)
+  if (isTap) endScrub(multiTouch ? wasPlaying : !wasPlaying)
   else endScrub(autoplayToggle.checked && e.type === 'pointerup')
 }
 stage.addEventListener('pointerup', onPointerEnd)
@@ -423,6 +444,19 @@ const endTimeline = (e: PointerEvent) => {
 timeline.addEventListener('pointerup', endTimeline)
 timeline.addEventListener('pointercancel', endTimeline)
 
+// Shift on its own flips mirror mode. It fires on release, so Shift+Arrow
+// (fine stepping) doesn't also flip it.
+let shiftAlone = false
+window.addEventListener('keydown', (e) => {
+  shiftAlone = e.key === 'Shift' && (shiftAlone || !e.repeat)
+})
+window.addEventListener('keyup', (e) => {
+  if (e.key !== 'Shift' || !shiftAlone) return
+  shiftAlone = false
+  if (loaded && !(e.target instanceof HTMLInputElement)) toggleSymmetric()
+})
+window.addEventListener('pointerdown', () => (shiftAlone = false), { capture: true })
+
 window.addEventListener('keydown', (e) => {
   if (!loaded || e.target instanceof HTMLInputElement) return
   if (e.code === 'Space') {
@@ -446,14 +480,39 @@ function resizeCanvas() {
 }
 new ResizeObserver(resizeCanvas).observe(stage)
 
-function drawFrame(frame: ImageBitmap) {
+function drawFrame(frame: CanvasImageSource, fw: number, fh: number) {
   const cw = canvas.width
   const ch = canvas.height
-  const scale = Math.min(cw / frame.width, ch / frame.height)
-  const w = frame.width * scale
-  const h = frame.height * scale
+  const scale = Math.min(cw / fw, ch / fh)
+  const w = fw * scale
+  const h = fh * scale
+  const x = (cw - w) / 2
+  const y = (ch - h) / 2
   ctx2d.clearRect(0, 0, cw, ch)
-  ctx2d.drawImage(frame, (cw - w) / 2, (ch - h) / 2, w, h)
+  if (!symmetric) {
+    ctx2d.drawImage(frame, x, y, w, h)
+    return
+  }
+  // Left half as is, then the same half flipped onto the right.
+  ctx2d.drawImage(frame, 0, 0, fw / 2, fh, x, y, w / 2, h)
+  ctx2d.save()
+  ctx2d.translate(cw, 0)
+  ctx2d.scale(-1, 1)
+  ctx2d.drawImage(frame, 0, 0, fw / 2, fh, x, y, w / 2, h)
+  ctx2d.restore()
+}
+const drawBitmap = (frame: ImageBitmap) => drawFrame(frame, frame.width, frame.height)
+
+/**
+ * Shows the real <video>. In mirror mode it can't be shown directly, so its
+ * current picture is drawn onto the canvas instead.
+ */
+function showVideo() {
+  if (!symmetric) setCanvasVisible(false)
+  else if (video.readyState >= 2 && video.videoWidth) {
+    drawFrame(video, video.videoWidth, video.videoHeight)
+    setCanvasVisible(true)
+  }
 }
 
 function setCanvasVisible(on: boolean) {
@@ -487,13 +546,13 @@ function render() {
     } else if (Math.abs(video.currentTime - t) > 0.2) {
       seekVideo(t)
     }
-    setCanvasVisible(false)
+    showVideo()
     needsSettle = false
   } else {
     if (!video.paused) video.pause()
     const frame = cache?.get(t)
     if (moving && frame) {
-      drawFrame(frame)
+      drawBitmap(frame)
       setCanvasVisible(true)
       needsSettle = true
     } else if (moving && showingCanvas && cache && cache.coverage >= 1) {
@@ -501,18 +560,19 @@ function render() {
       // drawn frame for a moment rather than falling back to slow seeks.
     } else if (moving) {
       // Cache not ready yet: fall back to (choppy) element seeks.
-      setCanvasVisible(false)
       seekVideo(t)
+      showVideo()
     } else if (needsSettle) {
       // Hold the cached frame until the full-quality video catches up.
-      if (frame) drawFrame(frame)
+      if (frame) drawBitmap(frame)
       seekVideo(t)
       if (!video.seeking && Math.abs(video.currentTime - t) <= 1 / 30) {
         needsSettle = false
-        setCanvasVisible(false)
+        showVideo()
       }
     } else {
       seekVideo(t)
+      if (symmetric && !video.seeking) showVideo()
     }
   }
 
