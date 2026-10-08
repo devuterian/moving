@@ -35,8 +35,12 @@ let target = 0
 let scrubbing = false
 let showingCanvas = false
 let needsSettle = false
-/** Mirror mode: the left half is reflected onto the right, about the center. */
-let symmetric = false
+/**
+ * Mirror mode: one half of the screen is reflected onto the other, about the
+ * center. 'left' keeps the left half (and flips it onto the right).
+ */
+type MirrorSide = 'left' | 'right'
+let symmetric: MirrorSide | null = null
 
 const SENSITIVITY_KEY = 'scrubber:sensitivity:v2'
 let secondsPerScreen = Number(localStorage.getItem(SENSITIVITY_KEY)) || DEFAULT_SECONDS_PER_SCREEN
@@ -358,14 +362,18 @@ let wasPlaying = false
 /** A second finger joined this drag (so its own tap doesn't toggle playback). */
 let multiTouch = false
 
-/** Extra fingers held down on the stage; mirror mode lasts while any is. */
-const mirrorPointers = new Set<number>()
-let shiftHeld = false
+/**
+ * Extra fingers held down on the stage, and the half each landed on. Mirror
+ * mode lasts while any is down; the latest finger picks the side.
+ */
+const mirrorPointers = new Map<number, MirrorSide>()
+let keySide: MirrorSide | null = null
 
 function updateSymmetric() {
-  const on = mirrorPointers.size > 0 || shiftHeld
-  if (on === symmetric) return
-  symmetric = on
+  const sides = [...mirrorPointers.values()]
+  const side = sides.length ? sides[sides.length - 1] : keySide
+  if (side === symmetric) return
+  symmetric = side
   // Redraw (or drop the canvas) right away, even while paused at rest.
   needsSettle = true
 }
@@ -377,7 +385,8 @@ stage.addEventListener('pointerdown', (e) => {
     // long as it stays down. The first finger keeps the drag.
     if (e.pointerType !== 'mouse') {
       multiTouch = true
-      mirrorPointers.add(e.pointerId)
+      const r = stage.getBoundingClientRect()
+      mirrorPointers.set(e.pointerId, e.clientX < r.left + r.width / 2 ? 'left' : 'right')
       stage.setPointerCapture(e.pointerId)
       updateSymmetric()
     }
@@ -453,18 +462,24 @@ const endTimeline = (e: PointerEvent) => {
 timeline.addEventListener('pointerup', endTimeline)
 timeline.addEventListener('pointercancel', endTimeline)
 
-// Holding Shift shows mirror mode until it's released.
-const setShift = (held: boolean) => {
-  shiftHeld = held && loaded
+// Held keys show mirror mode until released: Shift keeps the right half,
+// Cmd+Shift (Ctrl+Shift on Windows) the left.
+const setKeys = (e: KeyboardEvent | null) => {
+  keySide =
+    e && loaded && e.shiftKey && !(e.target instanceof HTMLInputElement)
+      ? e.metaKey || e.ctrlKey
+        ? 'left'
+        : 'right'
+      : null
   updateSymmetric()
 }
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Shift' && !(e.target instanceof HTMLInputElement)) setShift(true)
+  if (e.key === 'Shift' || e.key === 'Meta' || e.key === 'Control') setKeys(e)
 })
 window.addEventListener('keyup', (e) => {
-  if (e.key === 'Shift') setShift(false)
+  if (e.key === 'Shift' || e.key === 'Meta' || e.key === 'Control') setKeys(e)
 })
-window.addEventListener('blur', () => setShift(false))
+window.addEventListener('blur', () => setKeys(null))
 
 window.addEventListener('keydown', (e) => {
   if (!loaded || e.target instanceof HTMLInputElement) return
@@ -502,12 +517,18 @@ function drawFrame(frame: CanvasImageSource, fw: number, fh: number) {
     ctx2d.drawImage(frame, x, y, w, h)
     return
   }
-  // Left half as is, then the same half flipped onto the right.
-  ctx2d.drawImage(frame, 0, 0, fw / 2, fh, x, y, w / 2, h)
+  // A selfie clip's canvas is flipped by CSS, so its on-screen left is the
+  // frame's right.
+  const flipped = app.classList.contains('mirrored')
+  const keepLeft = (symmetric === 'left') !== flipped
+  const sx = keepLeft ? 0 : fw / 2
+  const dx = keepLeft ? x : x + w / 2
+  // The kept half as is, then the same half flipped onto the other side.
+  ctx2d.drawImage(frame, sx, 0, fw / 2, fh, dx, y, w / 2, h)
   ctx2d.save()
   ctx2d.translate(cw, 0)
   ctx2d.scale(-1, 1)
-  ctx2d.drawImage(frame, 0, 0, fw / 2, fh, x, y, w / 2, h)
+  ctx2d.drawImage(frame, sx, 0, fw / 2, fh, dx, y, w / 2, h)
   ctx2d.restore()
 }
 const drawBitmap = (frame: ImageBitmap) => drawFrame(frame, frame.width, frame.height)
