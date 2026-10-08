@@ -31,6 +31,44 @@ const SLIDERS: Slider[] = [
   { key: 'jitterMs', label: '늘이기 흔들림', hint: '꾹 누를 때 청크가 퍼지는 폭', min: 0, max: 100, step: 1, format: ms },
 ]
 
+/** One-tap starting points. Each sets every sound knob; frame size is left alone. */
+const PRESETS: { name: string; emoji: string; params: ScrubParams }[] = [
+  { name: '기본', emoji: '🐇', params: DEFAULT_SCRUB_PARAMS },
+  {
+    name: '턴테이블',
+    emoji: '🎧',
+    params: { grainMs: 40, overlap: 2, followMs: 3, smoothMs: 1, silentRate: 0.02, jitterMs: 25, tape: true },
+  },
+  {
+    name: '늘어진 카세트',
+    emoji: '📼',
+    params: { grainMs: 40, overlap: 2, followMs: 70, smoothMs: 40, silentRate: 0.02, jitterMs: 25, tape: true },
+  },
+  {
+    name: '또박또박',
+    emoji: '✂️',
+    params: { grainMs: 18, overlap: 2, followMs: 2, smoothMs: 0.5, silentRate: 0.1, jitterMs: 8, tape: false },
+  },
+  {
+    name: '로봇 목소리',
+    emoji: '🤖',
+    params: { grainMs: 10, overlap: 2, followMs: 8, smoothMs: 3, silentRate: 0.03, jitterMs: 0, tape: false },
+  },
+  {
+    name: '꿀 떨어지는',
+    emoji: '🍯',
+    params: { grainMs: 110, overlap: 4, followMs: 45, smoothMs: 25, silentRate: 0.04, jitterMs: 30, tape: false },
+  },
+  {
+    name: '꿈결',
+    emoji: '☁️',
+    params: { grainMs: 150, overlap: 4, followMs: 30, smoothMs: 15, silentRate: 0.06, jitterMs: 100, tape: false },
+  },
+]
+
+const sameParams = (a: ScrubParams, b: ScrubParams) =>
+  (Object.keys(a) as (keyof ScrubParams)[]).every((k) => a[k] === b[k])
+
 /** Long-edge caps for the scrub frames; 0 = automatic (by device). */
 const FRAME_EDGES: [number, string][] = [
   [0, '자동'],
@@ -56,6 +94,12 @@ export function initAdvanced(root: HTMLElement, engine: AudioEngine) {
   let state = load()
 
   root.innerHTML = `
+    <div class="adv-presets" role="radiogroup" aria-label="프리셋">
+      ${PRESETS.map(
+        (p, i) =>
+          `<button type="button" class="chip" role="radio" data-preset="${i}"><span aria-hidden="true">${p.emoji}</span>${p.name}</button>`,
+      ).join('')}
+    </div>
     ${SLIDERS.map(
       (s) => `
       <label class="adv-row" title="${s.hint}">
@@ -97,6 +141,9 @@ export function initAdvanced(root: HTMLElement, engine: AudioEngine) {
     root.querySelector<HTMLInputElement>('[data-flag="overlap"]')!.checked = state.params.overlap >= 4
     root.querySelector<HTMLInputElement>('[data-flag="tape"]')!.checked = state.params.tape
     root.querySelector<HTMLSelectElement>('[data-key="frameEdge"]')!.value = String(state.frameEdge)
+    root.querySelectorAll<HTMLElement>('[data-preset]').forEach((el) => {
+      el.setAttribute('aria-checked', String(sameParams(PRESETS[Number(el.dataset.preset)].params, state.params)))
+    })
   }
 
   root.addEventListener('input', (e) => {
@@ -112,7 +159,12 @@ export function initAdvanced(root: HTMLElement, engine: AudioEngine) {
     apply()
   })
   root.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('[data-adv="reset"]')) {
+    const preset = (e.target as HTMLElement).closest<HTMLElement>('[data-preset]')
+    if (preset) {
+      state = { ...state, params: { ...PRESETS[Number(preset.dataset.preset)].params } }
+      sync()
+      apply()
+    } else if ((e.target as HTMLElement).closest('[data-adv="reset"]')) {
       state = { params: { ...DEFAULT_SCRUB_PARAMS }, frameEdge: 0 }
       sync()
       apply()

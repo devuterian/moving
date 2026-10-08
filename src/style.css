@@ -996,3 +996,34 @@ html:not(.next) .next-only {
   padding: 10px;
   font-size: 13px;
 }
+
+.adv-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+
+.chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.chip[aria-checked='true'] {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
