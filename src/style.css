@@ -443,11 +443,13 @@ button:disabled {
 }
 
 .i-pause,
-.playing .i-play {
+.playing #play .i-play,
+.reversing #reverse .i-play {
   display: none;
 }
 
-.playing .i-pause {
+.playing #play .i-pause,
+.reversing #reverse .i-pause {
   display: block;
 }
 

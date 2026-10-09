@@ -69,6 +69,8 @@ export class AudioEngine {
   time = 0
   rate = 0
   playing = false
+  /** Direction of the latest play(): 1 forwards, -1 backwards. */
+  direction: 1 | -1 = 1
   duration = 0
   /** Waveform peaks of the loaded track, when load() was asked for them. */
   peaks: Float32Array | null = null
@@ -213,10 +215,12 @@ export class AudioEngine {
     this.post({ type: 'hold', on })
   }
 
-  play() {
-    if (this.time >= this.duration - 0.01) this.time = 0
+  play(dir: 1 | -1 = 1) {
+    if (dir > 0 && this.time >= this.duration - 0.01) this.time = 0
+    if (dir < 0 && this.time <= 0.01) this.time = this.duration
+    this.direction = dir
     this.playing = true
-    this.post({ type: 'play' })
+    this.post({ type: 'play', dir })
   }
 
   pause() {

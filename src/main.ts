@@ -272,7 +272,9 @@ app.addEventListener('click', (e) => {
       (rec) => rec && loadFile(rec.file, { mirrored: rec.mirrored }),
     )
   } else if (act === 'play') {
-    togglePlay()
+    togglePlay(1)
+  } else if (act === 'reverse') {
+    togglePlay(-1)
   } else if (act === 'settings') {
     setSettingsOpen(true)
   } else if (act === 'open-last') {
@@ -465,10 +467,11 @@ window.addEventListener('drop', (e) => {
 // ---------------------------------------------------------------------------
 // Playback
 
-function togglePlay() {
+/** Play in `dir` (1 forwards, -1 backwards); pressing the same way again pauses. */
+function togglePlay(dir: 1 | -1) {
   if (!loaded) return
-  if (engine.playing) engine.pause()
-  else engine.play()
+  if (engine.playing && engine.direction === dir) engine.pause()
+  else engine.play(dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +492,8 @@ function endScrub(resume: boolean) {
   scrubbing = false
   app.classList.remove('dragging')
   engine.hold(false)
-  if (resume) engine.play()
+  // Resume the way it was playing (a tap from rest plays forwards).
+  if (resume) engine.play(wasPlaying ? engine.direction : 1)
 }
 
 function scrubBy(seconds: number) {
@@ -641,7 +645,7 @@ window.addEventListener('keydown', (e) => {
   if (!loaded || e.target instanceof HTMLInputElement) return
   if (e.code === 'Space') {
     e.preventDefault()
-    togglePlay()
+    togglePlay(engine.playing ? engine.direction : 1)
   } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
     e.preventDefault()
     if (!scrubbing) beginScrub()
@@ -742,7 +746,7 @@ function drawWaveform(w: Waveform, t: number) {
 }
 
 function renderVideo(t: number, moving: boolean) {
-  if (engine.playing) {
+  if (engine.playing && engine.direction > 0) {
     // Normal forward playback: let the real <video> play, nudged to the audio clock.
     if (video.paused && !(t >= video.duration - 0.05)) {
       video.currentTime = t
@@ -797,6 +801,7 @@ function render() {
   $('played').style.transform = `scaleX(${p})`
   $('handle').style.left = `${p * 100}%`
   $('time').textContent = `${fmt(t)} / ${fmt(engine.duration)}`
-  app.classList.toggle('playing', engine.playing)
+  app.classList.toggle('playing', engine.playing && engine.direction > 0)
+  app.classList.toggle('reversing', engine.playing && engine.direction < 0)
 }
 requestAnimationFrame(render)

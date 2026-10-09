@@ -27,7 +27,8 @@ export type WorkletInMessage =
   | { type: 'load'; channels: Float32Array[]; sampleRate: number }
   | { type: 'target'; t: number }
   | { type: 'seek'; t: number }
-  | { type: 'play' }
+  /** Play at normal speed; `dir` -1 plays backwards. */
+  | { type: 'play'; dir: 1 | -1 }
   | { type: 'pause' }
   /** Finger is down (only sent while the freeze option is on). */
   | { type: 'hold'; on: boolean }
@@ -66,6 +67,7 @@ class ScrubProcessor extends AudioWorkletProcessor {
   private rate = 0
   private gain = 0
   private playing = false
+  private playDir: 1 | -1 = 1
   private hold = false
   private lastDir: -1 | 1 = 1
   private blockCount = 0
@@ -185,7 +187,10 @@ class ScrubProcessor extends AudioWorkletProcessor {
         this.gain = 0
         break
       case 'play':
-        if (this.pos >= this.length - 1) this.pos = 0
+        this.playDir = msg.dir
+        // At the end it's going towards: start over from the other end.
+        if (msg.dir > 0 && this.pos >= this.length - 1) this.pos = 0
+        if (msg.dir < 0 && this.pos <= 0) this.pos = Math.max(this.length - 1, 0)
         this.playing = true
         break
       case 'pause':
@@ -216,7 +221,7 @@ class ScrubProcessor extends AudioWorkletProcessor {
     for (let i = 0; i < frames; i++) {
       // Speed in real-time units (1 = normal playback, negative = backwards).
       let desired: number
-      if (this.playing) desired = 1
+      if (this.playing) desired = this.playDir
       else if (this.tape) {
         // Finger stopped (no events lately): let the velocity estimate die out.
         if (this.clock - this.lastTargetClock > FINGER_IDLE_SECONDS * sampleRate) this.fingerVel *= 0.999
@@ -229,15 +234,14 @@ class ScrubProcessor extends AudioWorkletProcessor {
       this.rate += (desired - this.rate) * this.rateAlpha
 
       let pos = this.pos + this.rate * this.step
-      if (pos <= 0) {
-        pos = 0
+      const edge = pos <= 0 ? 0 : pos >= last ? last : -1
+      if (edge >= 0) {
+        pos = edge
         this.rate = 0
-      } else if (pos >= last) {
-        pos = last
-        this.rate = 0
-        if (this.playing) {
+        // Only the end it's playing towards stops playback (it starts at rest).
+        if (this.playing && (edge === 0) === this.playDir < 0) {
           this.playing = false
-          this.target = last
+          this.target = edge
           this.port.postMessage({ type: 'ended' } satisfies WorkletOutMessage)
         }
       }
